@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/image_processing
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=rpc://
+      - SECRET_KEY=change-me
+      - UPLOAD_FOLDER=/tmp/uploads
+      - IMAGE_OUTPUT_DIR=/tmp/output_images
+      - OUTPUT_CSV_DIR=/tmp/output_csvs
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - app-network
+    volumes:
+      - upload_data:/tmp/uploads
+      - output_images:/tmp/output_images
+      - output_csvs:/tmp/output_csvs
+
+  celery_worker:
+    build: .
+    entrypoint: ["./celery-entrypoint.sh"]
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/image_processing
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=rpc://
+      - UPLOAD_FOLDER=/tmp/uploads
+      - IMAGE_OUTPUT_DIR=/tmp/output_images
+      - OUTPUT_CSV_DIR=/tmp/output_csvs
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - app-network
+    volumes:
+      - upload_data:/tmp/uploads
+      - output_images:/tmp/output_images
+      - output_csvs:/tmp/output_csvs
+
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=image_processing
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    ports:
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - app-network
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+volumes:
+  db_data:
+  rabbitmq_data:
+  upload_data:
+  output_images:
+  output_csvs:
+
+networks:
+  app-network:
+    driver: bridge
