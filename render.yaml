@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: image-processing-app
+    runtime: docker
+    plan: free
+    region: oregon
+    buildCommand: docker build -t image-processing-app .
+    startCommand: ./docker-entrypoint.sh
+    healthCheckPath: /status
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        value: amqp://guest:guest@localhost:5672//
+      - key: SECRET_KEY
+        generateValue: true
+      - key: UPLOAD_FOLDER
+        value: /tmp/uploads
+      - key: IMAGE_OUTPUT_DIR
+        value: /tmp/output_images
+      - key: OUTPUT_CSV_DIR
+        value: /tmp/output_csvs
+    autoDeploy: true
+
+  - type: pserv
+    name: celery-worker
+    runtime: docker
+    plan: free
+    region: oregon
+    buildCommand: docker build -t image-processing-app .
+    startCommand: ./celery-entrypoint.sh
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        value: amqp://guest:guest@localhost:5672//
+      - key: UPLOAD_FOLDER
+        value: /tmp/uploads
+      - key: IMAGE_OUTPUT_DIR
+        value: /tmp/output_images
+      - key: OUTPUT_CSV_DIR
+        value: /tmp/output_csvs
+    autoDeploy: true
+
+databases:
+  - name: postgres
+    databaseName: image_processing
+    plan: free
