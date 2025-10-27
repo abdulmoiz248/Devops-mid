@@ -1,7 +1,3 @@
-**code is in master branch**
-
-
-
 **Image Processing System** is a Flask-based web application designed to handle image processing tasks asynchronously using Celery and Redis. The system allows users to upload CSV files containing product information and image URLs, processes the images, and stores the results in a PostgreSQL database.
 
 ## **Project Structure**
