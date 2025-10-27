@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image Processing Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="header">
+      <h1>🖼️ Image Processing Dashboard</h1>
+      <p class="subtitle">Manage products, upload images, and track processing tasks</p>
+    </div>
+
+    <main class="dashboard-container">
+      <!-- Tab Navigation -->
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="upload">📤 Upload CSV</button>
+        <button class="tab-btn" data-tab="products">📦 Products</button>
+        <button class="tab-btn" data-tab="images">🖼️ Images</button>
+        <button class="tab-btn" data-tab="tasks">⚙️ Tasks</button>
+      </nav>
+
+      <!-- Upload Tab -->
+      <div class="tab-content active" id="upload-tab">
+        <section class="card">
+          <h2>📤 Upload CSV File</h2>
+          <p class="info">
+            CSV format: <code>Serial Number, Product Name, Input Image Urls</code><br>
+            Multiple URLs should be comma-separated within quotes in the third column.
+          </p>
+          
+          <div class="file-input-wrapper">
+            <input type="file" id="csvFile" accept=".csv" />
+            <label for="csvFile" class="file-label">
+              <span id="fileName">Choose CSV file...</span>
+            </label>
+          </div>
+          
+          <button id="uploadBtn" class="btn btn-primary">
+            <span class="btn-text">Upload & Process</span>
+          </button>
+          
+          <div id="uploadResult" class="result"></div>
+          <div id="taskList" class="task-list"></div>
+        </section>
+
+        <section class="card example">
+          <h2>📋 CSV Format Example</h2>
+          <pre class="code-block">Serial Number,Product Name,Input Image Urls
+12345,Product A,"https://example.com/img1.jpg, https://example.com/img2.jpg"
+67890,Product B,https://example.com/img3.jpg</pre>
+          <p class="note">⚠️ Note: When multiple URLs are provided, they must be enclosed in quotes and separated by commas.</p>
+        </section>
+      </div>
+
+      <!-- Products Tab -->
+      <div class="tab-content" id="products-tab">
+        <section class="card">
+          <div class="section-header">
+            <h2>📦 Products Management</h2>
+            <button id="addProductBtn" class="btn btn-secondary">+ Add Product</button>
+          </div>
+          
+          <div id="productsResult" class="result"></div>
+          
+          <div class="table-container">
+            <table class="data-table" id="productsTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Serial Number</th>
+                  <th>Product Name</th>
+                  <th>Images</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="productsTableBody">
+                <tr>
+                  <td colspan="5" class="loading">Loading products...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Images Tab -->
+      <div class="tab-content" id="images-tab">
+        <section class="card">
+          <h2>🖼️ Processed Images</h2>
+          <div id="imagesResult" class="result"></div>
+          
+          <div class="table-container">
+            <table class="data-table" id="imagesTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Product</th>
+                  <th>Serial Number</th>
+                  <th>Input URL</th>
+                  <th>Output URL</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="imagesTableBody">
+                <tr>
+                  <td colspan="6" class="loading">Loading images...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- Tasks Tab -->
+      <div class="tab-content" id="tasks-tab">
+        <section class="card">
+          <h2>⚙️ Task Status Checker</h2>
+          <p class="info">Enter a task ID to check its processing status</p>
+          
+          <div class="input-group">
+            <input type="text" id="taskIdInput" placeholder="Enter task ID (e.g., abc123-def456...)" />
+            <button id="checkBtn" class="btn btn-secondary">Check Status</button>
+          </div>
+          
+          <div id="statusResult" class="result"></div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Modal for Add/Edit Product -->
+    <div id="productModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3 id="modalTitle">Add Product</h3>
+          <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <form id="productForm">
+          <input type="hidden" id="productId" />
+          <div class="form-group">
+            <label for="serialNumber">Serial Number *</label>
+            <input type="text" id="serialNumber" required />
+          </div>
+          <div class="form-group">
+            <label for="productName">Product Name *</label>
+            <input type="text" id="productName" required />
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Product</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Image Preview Modal -->
+    <div id="imageModal" class="modal">
+      <div class="modal-content image-modal">
+        <button class="close-btn" onclick="closeImageModal()">&times;</button>
+        <img id="modalImage" src="" alt="Image preview" />
+      </div>
+    </div>
+
+    <footer>
+      <p>Image Processing Dashboard v2.0 | Powered by Flask, Celery & PostgreSQL</p>
+    </footer>
+
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>

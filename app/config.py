@@ -3,7 +3,8 @@ import os
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'a-very-secret-key'
-    SQLALCHEMY_DATABASE_URI = 'postgresql://postgres:1234@localhost:5432/image_processing'
+    # Allow overriding the DB URL via environment variable (used by Docker Compose)
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or 'postgresql://postgres:1234@localhost:5432/image_processing'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
     # Celery settings
