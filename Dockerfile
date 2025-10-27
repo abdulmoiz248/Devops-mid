@@ -19,8 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir
 # Copy the project
 COPY . .
 
-# Make entrypoints executable
-RUN chmod +x docker-entrypoint.sh celery-entrypoint.sh
+# Fix line endings and make entrypoints executable
+RUN apt-get update && apt-get install -y dos2unix && \
+    dos2unix docker-entrypoint.sh celery-entrypoint.sh && \
+    chmod +x docker-entrypoint.sh celery-entrypoint.sh && \
+    apt-get remove -y dos2unix && apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # Ensure runtime dirs exist
 RUN mkdir -p /tmp/uploads /tmp/output_images /tmp/output_csvs
