@@ -1,5 +1,5 @@
 #!/bin/sh
-Entrypoint for Celery worker,
+# Entrypoint for Celery worker
 echo "Waiting for postgres..."
 while ! nc -z db 5432; do
   sleep 0.1
