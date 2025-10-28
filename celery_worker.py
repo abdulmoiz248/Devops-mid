@@ -13,14 +13,14 @@ celery.conf.update(flask_app.config)
 
 
 class ContextTask(celery.Task):
-    def call(self, args, **kwargs):
+    def __call__(self, *args, **kwargs):
         with flask_app.app_context():
-            return self.run(args, **kwargs)
+            return self.run(*args, **kwargs)
 
 celery.Task = ContextTask
 
 
 from app.tasks import image_tasks  # noqa: F401
 
-if __name__== 'main':
+if __name__ == '__main__':
     celery.start()
