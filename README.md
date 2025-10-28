@@ -99,6 +99,66 @@ image-processing-system/
    flask run
    ```
 
+## DevOps & Report
+
+This repository also includes a DevOps report with pipeline, secrets, testing and lessons learned. See `devops_report.md` for the full write-up required by the assignment (pipeline diagram, secret management strategy, testing process and lessons learned).
+
+## Running locally (PowerShell)
+
+Below are quick PowerShell-friendly steps to set up and run the app locally for development. Adjust environment values as appropriate.
+
+1. Create and activate a virtual environment:
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+```
+
+2. Install dependencies:
+
+```powershell
+pip install -r requirements.txt
+```
+
+3. Set required environment variables (example):
+
+```powershell
+$env:FLASK_APP = 'app.app:app'
+$env:FLASK_ENV = 'development'
+$env:DATABASE_URL = 'postgresql://<user>:<password>@localhost:5432/image_processing'
+# Broker & backend for Celery
+$env:CELERY_BROKER_URL = 'redis://localhost:6379/0'
+$env:CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+```
+
+4. Run migrations (if using Flask-Migrate / Alembic):
+
+```powershell
+flask db upgrade
+```
+
+5. Start a Celery worker (in a separate terminal):
+
+```powershell
+celery -A app.celery worker --loglevel=info
+```
+
+6. Start the Flask app:
+
+```powershell
+flask run
+```
+
+## Tests
+
+Run unit tests with pytest:
+
+```powershell
+pytest -q
+```
+
+If your tests require services (Postgres, Redis), ensure those services are running or use test-specific configuration in `app/config_test.py`.
+
+
 ## **Usage**
 
 - **Upload CSV**: Use the `/upload` endpoint to upload CSV files containing product and image URLs.
