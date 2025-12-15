@@ -267,13 +267,63 @@ jobs:
           # Configure AWS CLI
           export AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
           
-          # Delete DB subnet groups with matching prefix (handles random suffixes)
+          # ==== CLEAN UP OLD VPCs (to avoid VpcLimitExceeded) ====
+          echo "Checking for old project VPCs..."
+          for vpc in $(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" --query "Vpcs[*].VpcId" --output text 2>/dev/null); do
+            echo "Found VPC: $vpc - cleaning up dependencies..."
+            
+            # Delete EC2 instances in VPC
+            for instance in $(aws ec2 describe-instances --filters "Name=vpc-id,Values=$vpc" "Name=instance-state-name,Values=running,stopped" --query "Reservations[*].Instances[*].InstanceId" --output text 2>/dev/null); do
+              echo "Terminating EC2 instance: $instance"
+              aws ec2 terminate-instances --instance-ids "$instance" 2>/dev/null || true
+            done
+            
+            # Wait for instances to terminate
+            sleep 30
+            
+            # Delete NAT Gateways
+            for nat in $(aws ec2 describe-nat-gateways --filter "Name=vpc-id,Values=$vpc" "Name=state,Values=available" --query "NatGateways[*].NatGatewayId" --output text 2>/dev/null); do
+              echo "Deleting NAT Gateway: $nat"
+              aws ec2 delete-nat-gateway --nat-gateway-id "$nat" 2>/dev/null || true
+            done
+            
+            # Delete Internet Gateways
+            for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query "InternetGateways[*].InternetGatewayId" --output text 2>/dev/null); do
+              echo "Detaching and deleting Internet Gateway: $igw"
+              aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc" 2>/dev/null || true
+              aws ec2 delete-internet-gateway --internet-gateway-id "$igw" 2>/dev/null || true
+            done
+            
+            # Delete Subnets
+            for subnet in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query "Subnets[*].SubnetId" --output text 2>/dev/null); do
+              echo "Deleting Subnet: $subnet"
+              aws ec2 delete-subnet --subnet-id "$subnet" 2>/dev/null || true
+            done
+            
+            # Delete Route Tables (non-main)
+            for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query "RouteTables[?Associations[0].Main!=\`true\`].RouteTableId" --output text 2>/dev/null); do
+              echo "Deleting Route Table: $rt"
+              aws ec2 delete-route-table --route-table-id "$rt" 2>/dev/null || true
+            done
+            
+            # Delete Security Groups (non-default)
+            for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query "SecurityGroups[?GroupName!=\`default\`].GroupId" --output text 2>/dev/null); do
+              echo "Deleting Security Group: $sg"
+              aws ec2 delete-security-group --group-id "$sg" 2>/dev/null || true
+            done
+            
+            # Finally delete the VPC
+            echo "Deleting VPC: $vpc"
+            aws ec2 delete-vpc --vpc-id "$vpc" 2>/dev/null || echo "Could not delete VPC $vpc - may have remaining dependencies"
+          done
+          
+          # ==== Delete DB subnet groups ====
           for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
             echo "Deleting DB subnet group: $sg"
             aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || echo "Could not delete $sg"
           done
           
-          # Delete orphaned DB instances if any
+          # ==== Delete orphaned DB instances ====
           for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
             echo "Found DB instance: $db - checking status..."
             status=$(aws rds describe-db-instances --db-instance-identifier "$db" --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null)
@@ -286,7 +336,7 @@ jobs:
           echo "Waiting for resource cleanup..."
           sleep 15
         continue-on-error: true
-      
+
       - name: Import Existing Resources (if any)
         run: |
           # Try to import existing key pair
