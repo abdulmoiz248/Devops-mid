@@ -284,7 +284,6 @@
         env:
           FLASK_APP: app.py
           FLASK_ENV: production
-          DATABASE_URL: "postgresql://{{ db_user }}:{{ db_password }}@{{ db_host }}/{{ db_name }}"
         volumes:
           - "{{ app_dir }}/uploads:/app/uploads"
           - "{{ app_dir }}/instance:/app/instance"
