@@ -1,0 +1,338 @@
+---
+# Main Ansible Playbook for DevOps Mid Project
+# Configures EC2 instances with Docker, dependencies, and deploys the application
+
+- name: Configure EC2 Instances and Deploy Application
+  hosts: ec2_instances
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    app_name: devops-mid
+    app_dir: /opt/app
+    app_port: 5000
+    app_repo: "https://github.com/yourusername/devops-mid.git"  # Update with your repo
+    docker_compose_version: "2.23.0"
+    
+  tasks:
+    # ================================
+    # System Update and Basic Setup
+    # ================================
+    - name: Update all packages
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+        update_cache: yes
+      tags: ['system', 'update']
+
+    - name: Install required system packages
+      ansible.builtin.yum:
+        name:
+          - git
+          - curl
+          - wget
+          - vim
+          - htop
+          - python3
+          - python3-pip
+          - amazon-cloudwatch-agent
+        state: present
+      tags: ['system', 'packages']
+
+    # ================================
+    # Docker Installation
+    # ================================
+    - name: Install Docker
+      ansible.builtin.yum:
+        name: docker
+        state: present
+      tags: ['docker']
+
+    - name: Start and enable Docker service
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+      tags: ['docker']
+
+    - name: Add ec2-user to docker group
+      ansible.builtin.user:
+        name: ec2-user
+        groups: docker
+        append: yes
+      tags: ['docker']
+
+    - name: Install Docker Compose
+      ansible.builtin.get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      tags: ['docker', 'compose']
+
+    - name: Create symbolic link for docker-compose
+      ansible.builtin.file:
+        src: /usr/local/bin/docker-compose
+        dest: /usr/bin/docker-compose
+        state: link
+      tags: ['docker', 'compose']
+
+    # ================================
+    # Python and Application Dependencies
+    # ================================
+    - name: Install Python packages
+      ansible.builtin.pip:
+        name:
+          - pip
+          - setuptools
+          - wheel
+          - virtualenv
+        executable: pip3
+        state: latest
+      tags: ['python']
+
+    - name: Install Docker SDK for Python
+      ansible.builtin.pip:
+        name:
+          - docker
+          - docker-compose
+        executable: pip3
+        state: present
+      tags: ['python', 'docker']
+
+    # ================================
+    # Application Directory Setup
+    # ================================
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+      tags: ['app']
+
+    - name: Create application subdirectories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+      loop:
+        - "{{ app_dir }}/logs"
+        - "{{ app_dir }}/uploads"
+        - "{{ app_dir }}/instance"
+      tags: ['app']
+
+    # ================================
+    # Environment Configuration
+    # ================================
+    - name: Create .env file for application
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0600'
+      tags: ['app', 'config']
+      when: db_endpoint is defined
+
+    # ================================
+    # Firewall Configuration
+    # ================================
+    - name: Check if firewalld is installed
+      ansible.builtin.command: which firewalld
+      register: firewalld_check
+      ignore_errors: yes
+      changed_when: false
+      tags: ['firewall']
+
+    - name: Open application ports
+      ansible.posix.firewalld:
+        port: "{{ item }}/tcp"
+        permanent: yes
+        state: enabled
+        immediate: yes
+      loop:
+        - "{{ app_port }}"
+        - "80"
+        - "443"
+      when: firewalld_check.rc == 0
+      tags: ['firewall']
+      ignore_errors: yes
+
+    # ================================
+    # Monitoring and Logging Setup
+    # ================================
+    - name: Create log rotation config
+      ansible.builtin.copy:
+        dest: /etc/logrotate.d/{{ app_name }}
+        content: |
+          {{ app_dir }}/logs/*.log {
+              daily
+              rotate 7
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0640 ec2-user ec2-user
+          }
+        mode: '0644'
+      tags: ['logging']
+
+    # ================================
+    # System Optimization
+    # ================================
+    - name: Set system limits for Docker
+      ansible.builtin.pam_limits:
+        domain: '*'
+        limit_type: '-'
+        limit_item: nofile
+        value: '65536'
+      tags: ['system', 'optimization']
+
+    - name: Configure sysctl for better networking
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { key: 'net.ipv4.ip_forward', value: '1' }
+        - { key: 'net.ipv4.tcp_tw_reuse', value: '1' }
+        - { key: 'vm.max_map_count', value: '262144' }
+      tags: ['system', 'optimization']
+      ignore_errors: yes
+
+    # ================================
+    # Health Check Script
+    # ================================
+    - name: Create health check script
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/health_check.sh"
+        content: |
+          #!/bin/bash
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:{{ app_port }}/health)
+          if [ $response -eq 200 ]; then
+              echo "Application is healthy"
+              exit 0
+          else
+              echo "Application is unhealthy (HTTP $response)"
+              exit 1
+          fi
+        mode: '0755'
+        owner: ec2-user
+        group: ec2-user
+      tags: ['app', 'monitoring']
+
+    # ================================
+    # Deployment Information
+    # ================================
+    - name: Display deployment information
+      ansible.builtin.debug:
+        msg:
+          - "Server configured successfully!"
+          - "Application directory: {{ app_dir }}"
+          - "Docker version: {{ ansible_facts.packages.docker[0].version | default('installed') }}"
+          - "Python version: {{ ansible_python_version }}"
+          - "Instance IP: {{ ansible_default_ipv4.address }}"
+      tags: ['info']
+
+# ================================
+# Application Deployment Playbook
+# ================================
+- name: Deploy Application with Docker
+  hosts: ec2_instances
+  become: yes
+  gather_facts: no
+  
+  vars:
+    app_name: devops-mid
+    app_dir: /opt/app
+    
+  tasks:
+    - name: Copy application files to server
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ app_dir }}/"
+        owner: ec2-user
+        group: ec2-user
+        mode: '0644'
+      loop:
+        - ../docker-compose.yml
+        - ../Dockerfile
+        - ../requirements.txt
+        - ../.dockerignore
+      tags: ['deploy']
+      when: false  # Set to true if you want to copy files directly
+
+    - name: Copy application source code
+      ansible.builtin.synchronize:
+        src: ../app/
+        dest: "{{ app_dir }}/app/"
+        recursive: yes
+      tags: ['deploy']
+      when: false  # Set to true if you want to sync files
+
+    - name: Build Docker image
+      community.docker.docker_image:
+        name: "{{ app_name }}"
+        build:
+          path: "{{ app_dir }}"
+        source: build
+        state: present
+      tags: ['deploy', 'docker']
+      when: false  # Enable when ready to build
+
+    - name: Start application with Docker Compose
+      community.docker.docker_compose:
+        project_src: "{{ app_dir }}"
+        state: present
+        pull: yes
+      tags: ['deploy', 'docker']
+      when: false  # Enable when ready to deploy
+
+    - name: Verify application is running
+      ansible.builtin.uri:
+        url: "http://localhost:{{ app_port }}/health"
+        status_code: 200
+      register: health_check
+      retries: 5
+      delay: 10
+      until: health_check.status == 200
+      tags: ['deploy', 'verify']
+      when: false  # Enable when app is deployed
+
+# ================================
+# Database Setup Playbook
+# ================================
+- name: Configure Database Connection
+  hosts: ec2_instances
+  become: yes
+  gather_facts: no
+  
+  vars:
+    app_dir: /opt/app
+    
+  tasks:
+    - name: Install PostgreSQL client
+      ansible.builtin.yum:
+        name: postgresql15
+        state: present
+      tags: ['database']
+
+    - name: Test database connectivity
+      ansible.builtin.command:
+        cmd: "psql -h {{ db_host }} -U {{ db_user }} -d {{ db_name }} -c 'SELECT 1;'"
+      environment:
+        PGPASSWORD: "{{ db_password }}"
+      register: db_test
+      ignore_errors: yes
+      tags: ['database']
+      when: db_host is defined
+
+    - name: Display database connection status
+      ansible.builtin.debug:
+        msg: "Database connection: {{ 'SUCCESS' if db_test.rc == 0 else 'FAILED' }}"
+      tags: ['database']
+      when: db_host is defined

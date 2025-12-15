@@ -49,7 +49,7 @@ variable "ec2_instance_type" {
 variable "ec2_instance_count" {
   description = "Number of EC2 instances"
   type        = number
-  default     = 2
+  default     = 1  # Set to 1 for free tier, can be increased to 2
 }
 
 variable "db_instance_class" {
@@ -81,4 +81,16 @@ variable "allowed_ssh_cidr" {
   description = "CIDR blocks allowed to SSH to EC2 instances"
   type        = list(string)
   default     = ["0.0.0.0/0"] # Change this to your IP for better security
+}
+
+variable "create_nat_gateway" {
+  description = "Whether to create NAT Gateway (costs ~$32/month). Set to false for free tier."
+  type        = bool
+  default     = false  # Set to false to save costs on free tier
+}
+
+variable "create_alb" {
+  description = "Whether to create Application Load Balancer (costs ~$16/month). Set to false for free tier."
+  type        = bool
+  default     = false  # Set to false to save costs, access EC2 directly
 }

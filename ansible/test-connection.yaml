@@ -1,0 +1,28 @@
+---
+# Simple Playbook to Test Connectivity
+# Usage: ansible-playbook -i inventory/hosts.ini test-connection.yaml
+
+- name: Test Ansible Connectivity
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: Ping all hosts
+      ansible.builtin.ping:
+      
+    - name: Display system information
+      ansible.builtin.debug:
+        msg:
+          - "Hostname: {{ ansible_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "IP Address: {{ ansible_default_ipv4.address }}"
+          - "Python: {{ ansible_python_version }}"
+    
+    - name: Check disk space
+      ansible.builtin.shell: df -h /
+      register: disk_space
+      changed_when: false
+      
+    - name: Display disk space
+      ansible.builtin.debug:
+        var: disk_space.stdout_lines

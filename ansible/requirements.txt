@@ -1,0 +1,8 @@
+# Ansible Requirements
+# Install with: pip install -r requirements.txt
+
+ansible>=2.14.0
+boto3>=1.26.0
+botocore>=1.29.0
+ansible-lint>=6.14.0
+jmespath>=1.0.1

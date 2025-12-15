@@ -72,8 +72,9 @@ resource "aws_instance" "app" {
   }
 }
 
-# Application Load Balancer
+# Application Load Balancer (Optional - costs ~$16/month)
 resource "aws_lb" "app" {
+  count              = var.create_alb ? 1 : 0
   name               = "${var.project_name}-alb"
   internal           = false
   load_balancer_type = "application"
@@ -89,6 +90,7 @@ resource "aws_lb" "app" {
 
 # Target Group
 resource "aws_lb_target_group" "app" {
+  count    = var.create_alb ? 1 : 0
   name     = "${var.project_name}-tg"
   port     = 5000
   protocol = "HTTP"
@@ -113,20 +115,21 @@ resource "aws_lb_target_group" "app" {
 
 # Register EC2 instances with target group
 resource "aws_lb_target_group_attachment" "app" {
-  count            = var.ec2_instance_count
-  target_group_arn = aws_lb_target_group.app.arn
+  count            = var.create_alb ? var.ec2_instance_count : 0
+  target_group_arn = aws_lb_target_group.app[0].arn
   target_id        = aws_instance.app[count.index].id
   port             = 5000
 }
 
 # ALB Listener
 resource "aws_lb_listener" "app" {
-  load_balancer_arn = aws_lb.app.arn
+  count             = var.create_alb ? 1 : 0
+  load_balancer_arn = aws_lb.app[0].arn
   port              = "80"
   protocol          = "HTTP"
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.app.arn
+    target_group_arn = aws_lb_target_group.app[0].arn
   }
 }

@@ -55,17 +55,17 @@ output "ec2_private_ips" {
 # Load Balancer Outputs
 output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
-  value       = aws_lb.app.dns_name
+  value       = var.create_alb ? aws_lb.app[0].dns_name : "ALB not created (disabled for free tier)"
 }
 
 output "alb_zone_id" {
   description = "Zone ID of the Application Load Balancer"
-  value       = aws_lb.app.zone_id
+  value       = var.create_alb ? aws_lb.app[0].zone_id : null
 }
 
 output "alb_arn" {
   description = "ARN of the Application Load Balancer"
-  value       = aws_lb.app.arn
+  value       = var.create_alb ? aws_lb.app[0].arn : null
 }
 
 # RDS Outputs
@@ -102,9 +102,11 @@ output "deployment_summary" {
     vpc_id              = aws_vpc.main.id
     ec2_count           = length(aws_instance.app)
     ec2_public_ips      = aws_instance.app[*].public_ip
-    alb_dns             = aws_lb.app.dns_name
+    alb_enabled         = var.create_alb
+    alb_dns             = var.create_alb ? aws_lb.app[0].dns_name : "Not created (free tier mode)"
     rds_endpoint        = aws_db_instance.postgres.endpoint
-    application_url     = "http://${aws_lb.app.dns_name}"
+    application_url     = var.create_alb ? "http://${aws_lb.app[0].dns_name}" : "http://${aws_instance.app[0].public_ip}:5000"
+    nat_gateway_enabled = var.create_nat_gateway
   }
 }
 
