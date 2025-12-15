@@ -267,6 +267,7 @@ jobs:
           terraform plan \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
             -out=tfplan
       

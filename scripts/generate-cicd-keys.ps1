@@ -84,8 +84,8 @@ Write-Host ""
 Write-Host "3️⃣  Test your setup:" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "   cd infra" -ForegroundColor White
-Write-Host "   `$pubKey = Get-Content ..\cicd-keys\github-actions-key.pub -Raw" -ForegroundColor White
-Write-Host "   terraform plan -var=`"ssh_public_key=`$pubKey`"" -ForegroundColor White
+Write-Host '   $pubKey = Get-Content ..\cicd-keys\github-actions-key.pub -Raw' -ForegroundColor White
+Write-Host '   terraform plan -var="ssh_public_key=$pubKey"' -ForegroundColor White
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host ""
@@ -94,15 +94,15 @@ Write-Host ""
 
 # Create a summary file
 $SummaryFile = "$KeyDir\GITHUB_SECRETS_SUMMARY.txt"
-@"
+$SummaryContent = @"
 GitHub Secrets Configuration Summary
 Generated: $(Get-Date)
 
 Add these secrets to your GitHub repository:
-Settings → Secrets and variables → Actions → New repository secret
+Settings -> Secrets and variables -> Actions -> New repository secret
 
 Required Secrets:
-═══════════════════════════════════════════════════════════
+===============================================================
 
 1. SSH_PRIVATE_KEY
    Content: See private key in github-actions-key file
@@ -114,11 +114,11 @@ Required Secrets:
 
 3. AWS_ACCESS_KEY_ID
    Content: Your AWS access key ID
-   Get from: AWS Console → IAM → Security credentials
+   Get from: AWS Console -> IAM -> Security credentials
 
 4. AWS_SECRET_ACCESS_KEY
    Content: Your AWS secret access key
-   Get from: AWS Console → IAM → Security credentials
+   Get from: AWS Console -> IAM -> Security credentials
 
 5. AWS_REGION
    Content: us-east-1 (or your preferred region)
@@ -132,9 +132,9 @@ Required Secrets:
 
 8. DOCKERHUB_TOKEN
    Content: Docker Hub access token
-   Get from: hub.docker.com → Settings → Security → New Access Token
+   Get from: hub.docker.com -> Settings -> Security -> New Access Token
 
-═══════════════════════════════════════════════════════════
+===============================================================
 
 After adding all secrets, push your code to GitHub:
 
@@ -144,8 +144,10 @@ After adding all secrets, push your code to GitHub:
 
 The pipeline will automatically run!
 
-═══════════════════════════════════════════════════════════
-"@ | Out-File -FilePath $SummaryFile -Encoding UTF8
+===============================================================
+"@
 
-Write-Host "📄 Summary saved to: $SummaryFile" -ForegroundColor Cyan
+$SummaryContent | Out-File -FilePath $SummaryFile -Encoding UTF8
+
+Write-Host "Summary saved to: $SummaryFile" -ForegroundColor Cyan
 Write-Host ""
