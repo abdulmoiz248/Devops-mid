@@ -82,9 +82,19 @@ variable "db_username" {
 }
 
 variable "db_password" {
-  description = "Database master password"
+  description = "Database master password (8-128 chars, cannot contain /, \", @, or spaces)"
   type        = string
   sensitive   = true
+
+  validation {
+    condition     = length(var.db_password) >= 8 && length(var.db_password) <= 128
+    error_message = "Password must be between 8 and 128 characters."
+  }
+
+  validation {
+    condition     = !can(regex("[/\"@ ]", var.db_password))
+    error_message = "Password cannot contain /, \", @, or spaces."
+  }
 }
 
 variable "allowed_ssh_cidr" {

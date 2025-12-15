@@ -64,7 +64,7 @@ resource "aws_instance" "app" {
               EOF
 
   root_block_device {
-    volume_size           = 20  # Free Tier: up to 30GB EBS, using 20GB to stay safe
+    volume_size           = 30  # Free Tier: up to 30GB EBS. Amazon Linux 2023 AMI requires >= 30GB
     volume_type           = "gp2"  # gp2 is free tier eligible (NOT gp3)
     delete_on_termination = true
   }
