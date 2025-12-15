@@ -375,13 +375,14 @@ jobs:
         run: |
           echo "ec2_ips=$(terraform output -json ec2_public_ips)" >> $GITHUB_OUTPUT
           echo "rds_endpoint=$(terraform output -raw rds_endpoint)" >> $GITHUB_OUTPUT
-          terraform output > ../outputs/terraform-output.txt
+          mkdir -p ${{ github.workspace }}/outputs
+          terraform output > ${{ github.workspace }}/outputs/terraform-output.txt
       
       - name: Upload Terraform Outputs
         uses: actions/upload-artifact@v4
         with:
           name: terraform-outputs
-          path: outputs/terraform-output.txt
+          path: ${{ github.workspace }}/outputs/terraform-output.txt
           retention-days: 30
       
       - name: Wait for EC2 to be ready
