@@ -30,7 +30,7 @@ permissions:
 env:
   PYTHON_VERSION: '3.11'
   TERRAFORM_VERSION: '1.6.0'
-  ANSIBLE_VERSION: '2.14.0'
+  ANSIBLE_VERSION: '8.7.0'
   AWS_REGION: 'us-east-1'
   PROJECT_NAME: 'devops-mid'
 
