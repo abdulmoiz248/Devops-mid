@@ -2,21 +2,21 @@ name: Complete CI/CD Pipeline - Deploy & Destroy
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       skip_destroy:
-        description: 'Skip infrastructure destroy at the end'
+        description: "Skip infrastructure destroy at the end"
         required: false
         type: boolean
         default: false
       deployment_mode:
-        description: 'Deployment mode'
+        description: "Deployment mode"
         required: false
         type: choice
-        default: 'full'
+        default: "full"
         options:
           - full
           - infrastructure-only
@@ -28,41 +28,41 @@ permissions:
   id-token: write
 
 env:
-  PYTHON_VERSION: '3.11'
-  TERRAFORM_VERSION: '1.6.0'
-  ANSIBLE_VERSION: '8.7.0'
-  AWS_REGION: 'us-east-1'
-  PROJECT_NAME: 'devops-mid'
+  PYTHON_VERSION: "3.11"
+  TERRAFORM_VERSION: "1.6.0"
+  ANSIBLE_VERSION: "8.7.0"
+  AWS_REGION: "us-east-1"
+  PROJECT_NAME: "devops-mid"
 
 jobs:
   # ============================================
   # STAGE 1: Build & Test Application
   # ============================================
   build-and-test:
-    name: '📦 Stage 1: Build & Test'
+    name: "📦 Stage 1: Build & Test"
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-      
+          cache: "pip"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-      
+
       - name: Run unit tests
         run: |
           pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
         continue-on-error: true
-      
+
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -72,7 +72,7 @@ jobs:
             coverage.xml
             pytest-results.xml
           retention-days: 7
-      
+
       - name: Test database connection
         run: |
           python test_db_connection.py || echo "Database test skipped (no DB yet)"
@@ -82,61 +82,61 @@ jobs:
   # STAGE 2: Security Scanning & Linting
   # ============================================
   security-and-lint:
-    name: '🔒 Stage 2: Security & Linting'
+    name: "🔒 Stage 2: Security & Linting"
     runs-on: ubuntu-latest
     needs: build-and-test
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install linting tools
         run: |
           pip install flake8 pylint bandit safety black isort
-      
+
       - name: Run Flake8
         run: |
           flake8 app/ --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 app/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
         continue-on-error: true
-      
+
       - name: Run Pylint
         run: |
           pylint app/ --exit-zero
         continue-on-error: true
-      
+
       - name: Run Bandit (Security Scanner)
         run: |
           bandit -r app/ -f json -o bandit-report.json || true
           bandit -r app/ -ll
         continue-on-error: true
-      
+
       - name: Check Python dependencies for vulnerabilities
         run: |
           safety check --json || true
         continue-on-error: true
-      
+
       - name: Run Black (Code Formatter Check)
         run: |
           black --check app/ || true
         continue-on-error: true
-      
+
       - name: Run isort (Import Sorter Check)
         run: |
           isort --check-only app/ || true
         continue-on-error: true
-      
+
       - name: Terraform Security Scan (tfsec)
         uses: aquasecurity/tfsec-action@v1.0.3
         with:
           working_directory: infra
           soft_fail: true
-      
+
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -150,27 +150,27 @@ jobs:
   # STAGE 3: Docker Build & Push
   # ============================================
   docker-build-push:
-    name: '🐳 Stage 3: Docker Build & Push'
+    name: "🐳 Stage 3: Docker Build & Push"
     runs-on: ubuntu-latest
     needs: security-and-lint
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
+
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -178,7 +178,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -191,7 +191,7 @@ jobs:
             type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
-      
+
       - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
@@ -204,27 +204,27 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
-      
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          format: "sarif"
+          output: "trivy-results.sarif"
         continue-on-error: true
-      
+
       - name: Upload Trivy results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: "trivy-results.sarif"
         continue-on-error: true
 
   # ============================================
   # STAGE 4: Terraform Infrastructure Provisioning
   # ============================================
   terraform-provision:
-    name: '🏗️ Stage 4: Terraform Provision'
+    name: "🏗️ Stage 4: Terraform Provision"
     runs-on: ubuntu-latest
     needs: docker-build-push
     if: github.event_name != 'pull_request'
@@ -234,39 +234,39 @@ jobs:
     outputs:
       ec2_ips: ${{ steps.output.outputs.ec2_ips }}
       rds_endpoint: ${{ steps.output.outputs.rds_endpoint }}
-      
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-      
+
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
         continue-on-error: true
-      
+
       - name: Terraform Init
         run: terraform init
-      
+
       - name: Terraform Validate
         run: terraform validate
-      
+
       - name: Clean Up Conflicting Resources
         run: |
           # Configure AWS CLI
           export AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
-          
+
           # ==== CLEAN UP OLD VPCs (to avoid VpcLimitExceeded) ====
           echo "Checking for old project VPCs..."
           for vpc in $(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" --query "Vpcs[*].VpcId" --output text 2>/dev/null); do
@@ -316,13 +316,13 @@ jobs:
             echo "Deleting VPC: $vpc"
             aws ec2 delete-vpc --vpc-id "$vpc" 2>/dev/null || echo "Could not delete VPC $vpc - may have remaining dependencies"
           done
-          
+
           # ==== Delete DB subnet groups ====
           for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
             echo "Deleting DB subnet group: $sg"
             aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || echo "Could not delete $sg"
           done
-          
+
           # ==== Delete orphaned DB instances ====
           for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
             echo "Found DB instance: $db - checking status..."
@@ -332,7 +332,7 @@ jobs:
               aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || echo "Could not delete $db"
             fi
           done
-          
+
           echo "Waiting for resource cleanup..."
           sleep 15
         continue-on-error: true
@@ -347,7 +347,7 @@ jobs:
             -var="ec2_instance_type=t3.micro" \
             aws_key_pair.deployer "${{ env.PROJECT_NAME }}-key" 2>/dev/null || echo "Key pair doesn't exist or already in state"
         continue-on-error: true
-      
+
       - name: Terraform Plan
         run: |
           terraform plan \
@@ -359,17 +359,17 @@ jobs:
             -var="ec2_instance_count=1" \
             -var="db_instance_class=db.t3.micro" \
             -out=tfplan
-      
+
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
-      
+
       - name: Save Terraform State
         uses: actions/upload-artifact@v4
         with:
           name: terraform-state
           path: infra/terraform.tfstate
           retention-days: 7
-      
+
       - name: Extract Terraform Outputs
         id: output
         run: |
@@ -377,14 +377,14 @@ jobs:
           echo "rds_endpoint=$(terraform output -raw rds_endpoint)" >> $GITHUB_OUTPUT
           mkdir -p ${{ github.workspace }}/outputs
           terraform output > ${{ github.workspace }}/outputs/terraform-output.txt
-      
+
       - name: Upload Terraform Outputs
         uses: actions/upload-artifact@v4
         with:
           name: terraform-outputs
           path: ${{ github.workspace }}/outputs/terraform-output.txt
           retention-days: 30
-      
+
       - name: Wait for EC2 to be ready
         run: sleep 60
 
@@ -392,41 +392,47 @@ jobs:
   # STAGE 5: Ansible Configuration & Deployment
   # ============================================
   ansible-deploy:
-    name: '⚙️ Stage 5: Ansible Deploy'
+    name: "⚙️ Stage 5: Ansible Deploy"
     runs-on: ubuntu-latest
     needs: terraform-provision
     if: github.event_name != 'pull_request'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install Ansible and dependencies
         run: |
           pip install ansible==${{ env.ANSIBLE_VERSION }}
           pip install boto3 botocore
           cd ansible
           ansible-galaxy collection install -r requirements.yml
-      
+
       - name: Configure AWS credentials for dynamic inventory
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      
+
       - name: Setup SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ needs.terraform-provision.outputs.ec2_ips }} >> ~/.ssh/known_hosts || true
-      
+
+      - name: Setup Terraform for inventory generation
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
       - name: Generate Ansible Inventory
         run: |
           cd infra
@@ -435,19 +441,19 @@ jobs:
           RDS_ENDPOINT=$(terraform output -raw rds_address)
           DB_NAME=$(terraform output -raw rds_database_name)
           DB_USER=$(terraform output -raw rds_username)
-          
+
           cat > ../ansible/inventory/hosts.ini <<EOF
           [ec2_instances]
           $(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
-          
+
           [ec2_instances:vars]
           ansible_user=ec2-user
           ansible_ssh_private_key_file=~/.ssh/id_rsa
           ansible_python_interpreter=/usr/bin/python3
-          
+
           [app_servers]
           $(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
-          
+
           [app_servers:vars]
           app_name=devops-mid
           app_port=5000
@@ -456,18 +462,18 @@ jobs:
           db_name=$DB_NAME
           db_user=$DB_USER
           db_password=${{ secrets.DB_PASSWORD }}
-          
+
           [all:vars]
           ansible_connection=ssh
           ansible_ssh_common_args='-o StrictHostKeyChecking=no'
           EOF
-      
+
       - name: Test Ansible Connectivity
         run: |
           cd ansible
           ansible all -m ping -i inventory/hosts.ini
         continue-on-error: true
-      
+
       - name: Run Ansible Playbook
         run: |
           cd ansible
@@ -476,7 +482,7 @@ jobs:
             -e "dockerhub_username=${{ secrets.DOCKERHUB_USERNAME }}" \
             -e "dockerhub_token=${{ secrets.DOCKERHUB_TOKEN }}" \
             -e "deploy_app=true"
-      
+
       - name: Verify Installation
         run: |
           cd ansible
@@ -488,27 +494,27 @@ jobs:
   # STAGE 6: Post-Deployment Smoke Tests
   # ============================================
   smoke-tests:
-    name: '✅ Stage 6: Smoke Tests'
+    name: "✅ Stage 6: Smoke Tests"
     runs-on: ubuntu-latest
     needs: [terraform-provision, ansible-deploy]
     if: github.event_name != 'pull_request'
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      
+
       - name: Install test dependencies
         run: |
           pip install requests pytest boto3
-      
+
       - name: Wait for services to stabilize
         run: sleep 30
-      
+
       - name: Run smoke tests
         run: |
           python scripts/smoke_tests.py
@@ -516,7 +522,7 @@ jobs:
           EC2_IPS: ${{ needs.terraform-provision.outputs.ec2_ips }}
           RDS_ENDPOINT: ${{ needs.terraform-provision.outputs.rds_endpoint }}
         continue-on-error: true
-      
+
       - name: Health Check - EC2 Instances
         run: |
           EC2_IPS='${{ needs.terraform-provision.outputs.ec2_ips }}'
@@ -525,7 +531,7 @@ jobs:
             curl -f http://$ip:5000/health || echo "Health check failed for $ip"
           done
         continue-on-error: true
-      
+
       - name: Upload smoke test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -539,7 +545,7 @@ jobs:
   # STAGE 7: Infrastructure Teardown
   # ============================================
   terraform-destroy:
-    name: '💥 Stage 7: Terraform Destroy'
+    name: "💥 Stage 7: Terraform Destroy"
     runs-on: ubuntu-latest
     needs: [terraform-provision, ansible-deploy, smoke-tests]
     if: |
@@ -550,36 +556,36 @@ jobs:
     defaults:
       run:
         working-directory: infra
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-      
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
-      
+
       - name: Download Terraform State
         uses: actions/download-artifact@v4
         with:
           name: terraform-state
           path: infra/
         continue-on-error: true
-      
+
       - name: Terraform Init
         run: terraform init
-      
+
       - name: Wait before destroy (allow time for testing)
         run: sleep 120
-      
+
       - name: Terraform Destroy
         run: |
           terraform destroy -auto-approve \
@@ -590,7 +596,7 @@ jobs:
             -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
             -var="db_instance_class=db.t3.micro"
-      
+
       - name: Cleanup Orphaned Resources
         run: |
           # Clean up any orphaned DB subnet groups
@@ -598,7 +604,7 @@ jobs:
             echo "Deleting orphaned DB subnet group: $sg"
             aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || true
           done
-          
+
           # Clean up any orphaned DB instances
           for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
             echo "Deleting orphaned DB instance: $db"
@@ -611,7 +617,7 @@ jobs:
           aws ec2 describe-instances \
             --filters "Name=tag:Project,Values=devops-mid" "Name=instance-state-name,Values=running" \
             --query 'Reservations[].Instances[].InstanceId' || echo "No instances found"
-          
+
           aws rds describe-db-instances \
             --query 'DBInstances[?DBInstanceIdentifier==`devops-mid-postgres`].DBInstanceIdentifier' || echo "No RDS found"
 
@@ -619,11 +625,20 @@ jobs:
   # Final Status Report
   # ============================================
   pipeline-status:
-    name: '📊 Pipeline Status Report'
+    name: "📊 Pipeline Status Report"
     runs-on: ubuntu-latest
-    needs: [build-and-test, security-and-lint, docker-build-push, terraform-provision, ansible-deploy, smoke-tests, terraform-destroy]
+    needs:
+      [
+        build-and-test,
+        security-and-lint,
+        docker-build-push,
+        terraform-provision,
+        ansible-deploy,
+        smoke-tests,
+        terraform-destroy,
+      ]
     if: always()
-    
+
     steps:
       - name: Generate Status Report
         run: |
@@ -645,7 +660,7 @@ jobs:
           echo "- **Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Workflow run:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
-      
+
       - name: Check if pipeline failed
         if: |
           needs.build-and-test.result == 'failure' ||
