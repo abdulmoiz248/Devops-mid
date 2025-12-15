@@ -14,10 +14,12 @@ data "aws_ami" "amazon_linux" {
   }
 }
 
-# SSH Key Pair (you'll need to create this or import existing)
+# SSH Key Pair
+# For CI/CD: Pass public key via variable
+# For local: Use file() function
 resource "aws_key_pair" "deployer" {
   key_name   = "${var.project_name}-key"
-  public_key = file("~/.ssh/id_rsa.pub") # Change this to your public key path
+  public_key = var.ssh_public_key != "" ? var.ssh_public_key : file(pathexpand("~/.ssh/id_rsa.pub"))
 
   tags = {
     Name = "${var.project_name}-key"

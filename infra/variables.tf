@@ -94,3 +94,10 @@ variable "create_alb" {
   type        = bool
   default     = false  # Set to false to save costs, access EC2 directly
 }
+
+variable "ssh_public_key" {
+  description = "SSH public key for EC2 access. Leave empty to use ~/.ssh/id_rsa.pub"
+  type        = string
+  default     = ""
+  sensitive   = false
+}
