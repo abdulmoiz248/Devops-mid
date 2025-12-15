@@ -28,14 +28,15 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible    = false
 
   multi_az               = false  # Must be false for free tier
-  backup_retention_period = 7
+  backup_retention_period = 0  # Must be 0 for free tier
   backup_window          = "03:00-04:00"
   maintenance_window     = "mon:04:00-mon:05:00"
 
   skip_final_snapshot       = true
   final_snapshot_identifier = "${var.project_name}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
 
-  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
+  # CloudWatch logs disabled for free tier
+  # enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
 
   tags = {
     Name = "${var.project_name}-postgres"

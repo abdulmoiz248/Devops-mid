@@ -64,8 +64,8 @@ resource "aws_instance" "app" {
               EOF
 
   root_block_device {
-    volume_size           = 20
-    volume_type           = "gp3"
+    volume_size           = 30  # Minimum required by AMI snapshot
+    volume_type           = "gp2"  # gp2 is free tier eligible
     delete_on_termination = true
   }
 
