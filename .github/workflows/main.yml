@@ -267,11 +267,24 @@ jobs:
           # Configure AWS CLI
           export AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
           
-          # Delete DB subnet group if it exists (will be recreated with correct VPC)
-          aws rds delete-db-subnet-group --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnet-group 2>/dev/null || echo "DB subnet group doesn't exist or already deleted"
+          # Delete DB subnet groups with matching prefix (handles random suffixes)
+          for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
+            echo "Deleting DB subnet group: $sg"
+            aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || echo "Could not delete $sg"
+          done
           
-          echo "Waiting for DB subnet group deletion..."
-          sleep 10
+          # Delete orphaned DB instances if any
+          for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
+            echo "Found DB instance: $db - checking status..."
+            status=$(aws rds describe-db-instances --db-instance-identifier "$db" --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null)
+            if [ "$status" != "deleting" ]; then
+              echo "Deleting DB instance: $db"
+              aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || echo "Could not delete $db"
+            fi
+          done
+          
+          echo "Waiting for resource cleanup..."
+          sleep 15
         continue-on-error: true
       
       - name: Import Existing Resources (if any)
@@ -522,10 +535,26 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
             -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
             -var="db_instance_class=db.t3.micro"
       
+      - name: Cleanup Orphaned Resources
+        run: |
+          # Clean up any orphaned DB subnet groups
+          for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
+            echo "Deleting orphaned DB subnet group: $sg"
+            aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || true
+          done
+          
+          # Clean up any orphaned DB instances
+          for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
+            echo "Deleting orphaned DB instance: $db"
+            aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || true
+          done
+        continue-on-error: true
+
       - name: Verify Cleanup
         run: |
           aws ec2 describe-instances \
