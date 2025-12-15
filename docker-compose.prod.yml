@@ -1,0 +1,246 @@
+# =============================================================================
+# Docker Compose Configuration for Production
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Flask Web Application (Production)
+  # ---------------------------------------------------------------------------
+  web:
+    build: 
+      context: .
+      target: runtime
+    image: image-processing-app:latest
+    container_name: image-processing-web-prod
+    ports:
+      - "${WEB_PORT:-80}:5000"
+    env_file:
+      - .env.production
+    environment:
+      - FLASK_ENV=production
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-2}
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - upload_data:/tmp/uploads
+      - output_images:/tmp/output_images
+      - output_csvs:/tmp/output_csvs
+      - app_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker (Production)
+  # ---------------------------------------------------------------------------
+  celery_worker:
+    build:
+      context: .
+      target: runtime
+    image: image-processing-app:latest
+    container_name: image-processing-celery-prod
+    entrypoint: ["./celery-entrypoint.sh"]
+    env_file:
+      - .env.production
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    volumes:
+      - upload_data:/tmp/uploads
+      - output_images:/tmp/output_images
+      - output_csvs:/tmp/output_csvs
+      - app_logs:/app/logs
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL Database (Production)
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: image-processing-db-prod
+    restart: always
+    env_file:
+      - .env.production
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - db_backups:/backups
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Security: Don't expose port externally in production
+    # Use a secure tunnel or VPN for database access
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ Message Broker (Production)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: image-processing-rabbitmq-prod
+    restart: always
+    env_file:
+      - .env.production
+    networks:
+      - app-network
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Management UI only accessible internally
+    # For production, consider using external RabbitMQ cluster
+
+  # ---------------------------------------------------------------------------
+  # Nginx Reverse Proxy (Optional for Production)
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: image-processing-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    networks:
+      - app-network
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# =============================================================================
+# Persistent Volumes (Production)
+# =============================================================================
+volumes:
+  db_data:
+    driver: local
+    name: image-processing-db-data-prod
+  db_backups:
+    driver: local
+    name: image-processing-db-backups
+  rabbitmq_data:
+    driver: local
+    name: image-processing-rabbitmq-data-prod
+  upload_data:
+    driver: local
+    name: image-processing-uploads-prod
+  output_images:
+    driver: local
+    name: image-processing-output-images-prod
+  output_csvs:
+    driver: local
+    name: image-processing-output-csvs-prod
+  app_logs:
+    driver: local
+    name: image-processing-logs
+
+# =============================================================================
+# Networks (Production)
+# =============================================================================
+networks:
+  app-network:
+    driver: bridge
+    name: image-processing-network-prod
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16

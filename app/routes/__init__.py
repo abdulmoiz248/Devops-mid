@@ -3,6 +3,7 @@ from .upload_routes import upload_routes
 from .status_routes import status
 from .webhooks_routes import webhook
 from .products_routes import products_routes
+from .health_routes import health_bp
 
 
 def register_blueprints(app):
@@ -12,6 +13,7 @@ def register_blueprints(app):
     app.register_blueprint(status)
     app.register_blueprint(webhook)
     app.register_blueprint(products_routes)
+    app.register_blueprint(health_bp)
 
     # Serve the frontend index from the package static folder
     @app.route('/')

@@ -22,6 +22,10 @@ def create_app():
     migrate.init_app(app, db)
     celery.conf.update(app.config)
 
+    # Setup middleware
+    from app.middleware import setup_middleware
+    setup_middleware(app)
+
     # Register blueprints
     from app.routes import register_blueprints
     register_blueprints(app)

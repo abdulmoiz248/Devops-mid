@@ -1,24 +1,59 @@
 from flask import Blueprint, request, jsonify
 from app.models import Product, Image, db
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
+from app.middleware import rate_limit
 
 products_routes = Blueprint('products', __name__, url_prefix='/api/products')
 
 
 @products_routes.route('', methods=['GET'])
+@rate_limit(max_requests=100, window_seconds=60)
 def list_products():
-    """List all products with their image counts"""
+    """List all products with their image counts, with pagination and search"""
     try:
-        products = Product.query.all()
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        # Validate pagination parameters
+        per_page = min(per_page, 100)  # Maximum 100 items per page
+        
+        # Build query with optional search
+        query = Product.query
+        if search:
+            search_pattern = f'%{search}%'
+            query = query.filter(
+                or_(
+                    Product.serial_number.ilike(search_pattern),
+                    Product.product_name.ilike(search_pattern)
+                )
+            )
+        
+        # Execute paginated query
+        paginated = query.paginate(page=page, per_page=per_page, error_out=False)
+        
         result = []
-        for product in products:
+        for product in paginated.items:
             result.append({
                 'id': product.id,
                 'serial_number': product.serial_number,
                 'product_name': product.product_name,
                 'image_count': len(product.images)
             })
-        return jsonify({'products': result}), 200
+        
+        return jsonify({
+            'products': result,
+            'pagination': {
+                'page': paginated.page,
+                'per_page': paginated.per_page,
+                'total': paginated.total,
+                'pages': paginated.pages,
+                'has_next': paginated.has_next,
+                'has_prev': paginated.has_prev
+            }
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
