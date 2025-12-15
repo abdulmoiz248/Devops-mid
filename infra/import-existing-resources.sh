@@ -14,6 +14,13 @@ PROJECT_NAME="devops-mid"
 
 echo -e "${YELLOW}🔄 Importing existing AWS resources into Terraform state...${NC}\n"
 
+# Clean up DB subnet group if it exists (to avoid VPC mismatch)
+echo -e "${YELLOW}Cleaning up old DB subnet group...${NC}"
+aws rds delete-db-subnet-group --db-subnet-group-name "${PROJECT_NAME}-db-subnet-group" 2>/dev/null || echo -e "${YELLOW}DB subnet group doesn't exist${NC}"
+echo "Waiting for deletion..."
+sleep 10
+echo ""
+
 # Function to import a resource
 import_resource() {
     local resource_type=$1
@@ -35,11 +42,8 @@ import_resource \
     "aws_key_pair.deployer" \
     "${PROJECT_NAME}-key"
 
-# Import DB Subnet Group
-import_resource \
-    "RDS DB Subnet Group" \
-    "aws_db_subnet_group.main" \
-    "${PROJECT_NAME}-db-subnet-group"
+# Note: DB Subnet Group is NOT imported - it will be created fresh with correct VPC
+echo -e "${YELLOW}ℹ️  DB Subnet Group will be created fresh (not imported)${NC}\n"
 
 # Optional: Import other resources if needed
 # Uncomment and modify as needed:

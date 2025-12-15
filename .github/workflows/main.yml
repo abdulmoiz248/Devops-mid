@@ -262,6 +262,18 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
       
+      - name: Clean Up Conflicting Resources
+        run: |
+          # Configure AWS CLI
+          export AWS_DEFAULT_REGION=${{ env.AWS_REGION }}
+          
+          # Delete DB subnet group if it exists (will be recreated with correct VPC)
+          aws rds delete-db-subnet-group --db-subnet-group-name ${{ env.PROJECT_NAME }}-db-subnet-group 2>/dev/null || echo "DB subnet group doesn't exist or already deleted"
+          
+          echo "Waiting for DB subnet group deletion..."
+          sleep 10
+        continue-on-error: true
+      
       - name: Import Existing Resources (if any)
         run: |
           # Try to import existing key pair
@@ -269,14 +281,8 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
+            -var="ec2_instance_type=t2.micro" \
             aws_key_pair.deployer "${{ env.PROJECT_NAME }}-key" 2>/dev/null || echo "Key pair doesn't exist or already in state"
-          
-          # Try to import existing DB subnet group
-          terraform import -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="aws_region=${{ env.AWS_REGION }}" \
-            -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
-            -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
-            aws_db_subnet_group.main "${{ env.PROJECT_NAME }}-db-subnet-group" 2>/dev/null || echo "DB subnet group doesn't exist or already in state"
         continue-on-error: true
       
       - name: Terraform Plan
@@ -286,6 +292,9 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
+            -var="ec2_instance_type=t2.micro" \
+            -var="ec2_instance_count=1" \
+            -var="db_instance_class=db.t3.micro" \
             -out=tfplan
       
       - name: Terraform Apply

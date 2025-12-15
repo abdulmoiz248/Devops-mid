@@ -6,6 +6,11 @@ resource "aws_db_subnet_group" "main" {
   tags = {
     Name = "${var.project_name}-db-subnet-group"
   }
+
+  # Force replacement when subnets change to avoid VPC mismatch
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # RDS PostgreSQL Instance
