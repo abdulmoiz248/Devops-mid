@@ -520,7 +520,11 @@ jobs:
         run: |
           terraform destroy -auto-approve \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="aws_region=${{ env.AWS_REGION }}"
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -var="ec2_instance_type=t2.micro" \
+            -var="ec2_instance_count=1" \
+            -var="db_instance_class=db.t3.micro"
       
       - name: Verify Cleanup
         run: |

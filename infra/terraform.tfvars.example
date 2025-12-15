@@ -1,5 +1,11 @@
 # Example terraform.tfvars file
 # Copy this to terraform.tfvars and update with your values
+#
+# ⚠️ AWS FREE TIER LIMITS (as of 2024):
+# - EC2: 750 hours/month of t2.micro or t3.micro
+# - RDS: 750 hours/month of db.t3.micro with 20GB storage
+# - Storage: 30GB EBS (gp2/gp3), 5GB S3
+# - Data Transfer: 100GB out/month
 
 aws_region         = "us-east-1"
 project_name       = "devops-mid"
@@ -11,15 +17,19 @@ availability_zones   = ["us-east-1a", "us-east-1b"]
 public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24"]
 private_subnet_cidrs = ["10.0.11.0/24", "10.0.12.0/24"]
 
-# EC2 Configuration
-ec2_instance_count = 2
-ec2_instance_type  = "t2.micro"  # Free tier eligible
+# EC2 Configuration - FREE TIER
+ec2_instance_count = 1            # Use 1 to stay within free tier (750 hours/month)
+ec2_instance_type  = "t2.micro"   # Free tier eligible (t2.micro or t3.micro)
 
-# RDS Configuration
-db_instance_class = "db.t3.micro"  # Free tier eligible
-db_name          = "devopsdb"
-db_username      = "dbadmin"
-db_password      = "ChangeMe123!SecurePassword"  # CHANGE THIS!
+# RDS Configuration - FREE TIER
+db_instance_class = "db.t3.micro"  # Free tier eligible (db.t3.micro or db.t4g.micro)
+db_name           = "devopsdb"
+db_username       = "dbadmin"
+db_password       = "ChangeMe123!SecurePassword"  # CHANGE THIS!
+
+# Cost-saving options (set to false for free tier)
+create_nat_gateway = false  # NAT Gateway costs ~$32/month
+create_alb         = false  # ALB costs ~$16/month
 
 # Security Configuration
 allowed_ssh_cidr = ["0.0.0.0/0"]  # CHANGE THIS to your IP: ["YOUR_IP/32"]

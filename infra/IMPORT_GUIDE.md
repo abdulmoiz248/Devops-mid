@@ -97,10 +97,12 @@ The workflow includes a new step **before** `terraform plan`:
 ```
 
 This step:
-- ✅ Imports resources if they exist in AWS
+- ✅ Deletes conflicting DB subnet group (fixes VPC mismatch)
+- ✅ Imports key pair if it exists in AWS
 - ✅ Adds them to Terraform state
-- ✅ Skips if resources don't exist
-- ✅ Continues pipeline execution regardless of import success
+- ✅ Enforces free tier instance types
+- ✅ Creates fresh DB subnet group with correct VPC
+- ✅ Continues pipeline execution regardless of cleanup/import success
 
 ### Terraform State Management
 Once imported, Terraform will:
@@ -110,9 +112,10 @@ Once imported, Terraform will:
 
 ## Resources That Can Be Imported
 
-Currently configured to import:
-1. **EC2 Key Pair**: `aws_key_pair.deployer` → `devops-mid-key`
-2. **DB Subnet Group**: `aws_db_subnet_group.main` → `devops-mid-db-subnet-group`
+Currently configured to handle:
+1. **EC2 Key Pair**: `aws_key_pair.deployer` → Imported if exists
+2. **DB Subnet Group**: Deleted and recreated (fixes VPC mismatch)
+3. **Instance Types**: Forced to free tier (`t2.micro`, `db.t3.micro`)
 
 ## Adding More Resources to Import
 

@@ -41,9 +41,14 @@ variable "private_subnet_cidrs" {
 }
 
 variable "ec2_instance_type" {
-  description = "EC2 instance type"
+  description = "EC2 instance type - MUST be t2.micro or t3.micro for Free Tier"
   type        = string
-  default     = "t2.micro"
+  default     = "t2.micro"  # Free Tier eligible: t2.micro (most regions) or t3.micro
+
+  validation {
+    condition     = contains(["t2.micro", "t3.micro"], var.ec2_instance_type)
+    error_message = "For Free Tier, instance type must be t2.micro or t3.micro."
+  }
 }
 
 variable "ec2_instance_count" {
@@ -53,9 +58,14 @@ variable "ec2_instance_count" {
 }
 
 variable "db_instance_class" {
-  description = "RDS instance class"
+  description = "RDS instance class - MUST be db.t3.micro or db.t4g.micro for Free Tier"
   type        = string
-  default     = "db.t3.micro"
+  default     = "db.t3.micro"  # Free Tier eligible
+
+  validation {
+    condition     = contains(["db.t3.micro", "db.t4g.micro"], var.db_instance_class)
+    error_message = "For Free Tier, DB instance class must be db.t3.micro or db.t4g.micro."
+  }
 }
 
 variable "db_name" {
