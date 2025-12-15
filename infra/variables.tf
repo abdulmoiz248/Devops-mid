@@ -101,3 +101,9 @@ variable "ssh_public_key" {
   default     = ""
   sensitive   = false
 }
+
+variable "docker_image" {
+  description = "Docker image to deploy on EC2 instances"
+  type        = string
+  default     = "devops-mid:latest"
+}

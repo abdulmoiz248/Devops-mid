@@ -168,8 +168,8 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       
       - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -184,7 +184,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/devops-mid
             ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch
@@ -208,7 +208,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ secrets.DOCKER_USERNAME }}/${{ env.PROJECT_NAME }}:latest
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest
           format: 'sarif'
           output: 'trivy-results.sarif'
         continue-on-error: true
@@ -267,6 +267,7 @@ jobs:
           terraform plan \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
             -out=tfplan
       
       - name: Terraform Apply
@@ -379,7 +380,11 @@ jobs:
       - name: Run Ansible Playbook
         run: |
           cd ansible
-          ansible-playbook -i inventory/hosts.ini playbook.yaml -v
+          ansible-playbook -i inventory/hosts.ini playbook.yaml -v \
+            -e "docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
+            -e "dockerhub_username=${{ secrets.DOCKERHUB_USERNAME }}" \
+            -e "dockerhub_token=${{ secrets.DOCKERHUB_TOKEN }}" \
+            -e "deploy_app=true"
       
       - name: Verify Installation
         run: |
