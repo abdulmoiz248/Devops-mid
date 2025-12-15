@@ -281,7 +281,7 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
-            -var="ec2_instance_type=t2.micro" \
+            -var="ec2_instance_type=t3.micro" \
             aws_key_pair.deployer "${{ env.PROJECT_NAME }}-key" 2>/dev/null || echo "Key pair doesn't exist or already in state"
         continue-on-error: true
       
@@ -292,7 +292,7 @@ jobs:
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
-            -var="ec2_instance_type=t2.micro" \
+            -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
             -var="db_instance_class=db.t3.micro" \
             -out=tfplan
@@ -522,7 +522,7 @@ jobs:
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="aws_region=${{ env.AWS_REGION }}" \
             -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
-            -var="ec2_instance_type=t2.micro" \
+            -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
             -var="db_instance_class=db.t3.micro"
       

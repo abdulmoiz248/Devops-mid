@@ -43,7 +43,7 @@ variable "private_subnet_cidrs" {
 variable "ec2_instance_type" {
   description = "EC2 instance type - MUST be t2.micro or t3.micro for Free Tier"
   type        = string
-  default     = "t2.micro"  # Free Tier eligible: t2.micro (most regions) or t3.micro
+  default     = "t3.micro"  # Free Tier eligible: t3.micro (recommended for new accounts)
 
   validation {
     condition     = contains(["t2.micro", "t3.micro"], var.ec2_instance_type)
