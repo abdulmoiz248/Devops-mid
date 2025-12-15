@@ -1,0 +1,144 @@
+# =============================================================================
+# Flask Web Application Deployment
+# =============================================================================
+# Main application deployment with health checks and resource management
+# Usage: kubectl apply -f deployment.yaml -n <namespace>
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-processing-web
+  labels:
+    app: image-processing
+    component: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: image-processing
+      component: web
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: image-processing
+        component: web
+    spec:
+      # Init container to wait for dependencies
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres-service 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done; echo "PostgreSQL is ready!"']
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z rabbitmq-service 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is ready!"']
+      
+      containers:
+        - name: web
+          image: image-processing-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+              name: http
+          env:
+            - name: FLASK_APP
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: FLASK_APP
+            - name: FLASK_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: FLASK_ENV
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: DATABASE_URL
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: CELERY_BROKER_URL
+            - name: CELERY_RESULT_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: CELERY_RESULT_BACKEND
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: image-processing-secrets
+                  key: SECRET_KEY
+            - name: UPLOAD_FOLDER
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: UPLOAD_FOLDER
+            - name: IMAGE_OUTPUT_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: IMAGE_OUTPUT_DIR
+            - name: OUTPUT_CSV_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: OUTPUT_CSV_DIR
+          volumeMounts:
+            - name: upload-storage
+              mountPath: /tmp/uploads
+            - name: output-images
+              mountPath: /tmp/output_images
+            - name: output-csvs
+              mountPath: /tmp/output_csvs
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+      
+      volumes:
+        - name: upload-storage
+          emptyDir: {}
+        - name: output-images
+          emptyDir: {}
+        - name: output-csvs
+          emptyDir: {}
+      
+      # Pod anti-affinity for high availability (spread across nodes)
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - web
+                topologyKey: kubernetes.io/hostname

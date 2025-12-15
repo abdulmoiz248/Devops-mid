@@ -1,0 +1,70 @@
+# =============================================================================
+# Kubernetes Services
+# =============================================================================
+# Exposes the Flask web application
+# Usage: kubectl apply -f service.yaml -n <namespace>
+
+---
+# ClusterIP Service for internal communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-processing-service
+  labels:
+    app: image-processing
+    component: web
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 5000
+      protocol: TCP
+      name: http
+  selector:
+    app: image-processing
+    component: web
+
+---
+# NodePort Service for external access (Minikube)
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-processing-nodeport
+  labels:
+    app: image-processing
+    component: web
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 5000
+      nodePort: 30090
+      protocol: TCP
+      name: http
+  selector:
+    app: image-processing
+    component: web
+
+---
+# LoadBalancer Service for cloud environments (EKS, GKE, AKS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-processing-lb
+  labels:
+    app: image-processing
+    component: web
+  annotations:
+    # AWS EKS specific annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 5000
+      protocol: TCP
+      name: http
+  selector:
+    app: image-processing
+    component: web

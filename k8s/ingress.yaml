@@ -1,0 +1,77 @@
+# =============================================================================
+# Kubernetes Ingress Configuration
+# =============================================================================
+# Provides external HTTP/HTTPS access with path-based routing
+# Prerequisites: 
+#   - Minikube: minikube addons enable ingress
+#   - EKS: Install AWS Load Balancer Controller or NGINX Ingress Controller
+# Usage: kubectl apply -f ingress.yaml -n <namespace>
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: image-processing-ingress
+  labels:
+    app: image-processing
+  annotations:
+    # NGINX Ingress Controller annotations
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    
+    # For AWS ALB Ingress Controller (uncomment if using AWS)
+    # kubernetes.io/ingress.class: alb
+    # alb.ingress.kubernetes.io/scheme: internet-facing
+    # alb.ingress.kubernetes.io/target-type: ip
+spec:
+  ingressClassName: nginx
+  rules:
+    # Development environment (use with /etc/hosts or local DNS)
+    - host: image-processing.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: image-processing-service
+                port:
+                  number: 80
+    
+    # Production environment (replace with your domain)
+    - host: image-processing.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: image-processing-service
+                port:
+                  number: 80
+
+---
+# Ingress for RabbitMQ Management UI (optional, for debugging)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rabbitmq-ingress
+  labels:
+    app: image-processing
+    component: message-broker
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rabbitmq.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rabbitmq-service
+                port:
+                  number: 15672
