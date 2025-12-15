@@ -1,0 +1,23 @@
+# =============================================================================
+# Kubernetes Namespaces for Environment Isolation
+# =============================================================================
+# Creates separate namespaces for development and production environments
+# Usage: kubectl apply -f namespace.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-processing-dev
+  labels:
+    app: image-processing
+    environment: development
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: image-processing-prod
+  labels:
+    app: image-processing
+    environment: production

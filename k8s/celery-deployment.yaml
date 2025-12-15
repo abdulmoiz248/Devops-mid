@@ -1,0 +1,114 @@
+# =============================================================================
+# Celery Worker Deployment
+# =============================================================================
+# Deploys Celery workers for async image processing tasks
+# Can be deployed as separate pods or as sidecar (see deployment-with-sidecar.yaml)
+# Usage: kubectl apply -f celery-deployment.yaml -n <namespace>
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  labels:
+    app: image-processing
+    component: celery-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: image-processing
+      component: celery-worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: image-processing
+        component: celery-worker
+    spec:
+      # Init container to wait for dependencies
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z postgres-service 5432; do echo "Waiting for PostgreSQL..."; sleep 2; done; echo "PostgreSQL is ready!"']
+        - name: wait-for-rabbitmq
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z rabbitmq-service 5672; do echo "Waiting for RabbitMQ..."; sleep 2; done; echo "RabbitMQ is ready!"']
+      
+      containers:
+        - name: celery-worker
+          image: image-processing-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "celery_worker.celery", "worker", "--loglevel=info"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: DATABASE_URL
+            - name: CELERY_BROKER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: CELERY_BROKER_URL
+            - name: CELERY_RESULT_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: CELERY_RESULT_BACKEND
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: image-processing-secrets
+                  key: SECRET_KEY
+            - name: UPLOAD_FOLDER
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: UPLOAD_FOLDER
+            - name: IMAGE_OUTPUT_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: IMAGE_OUTPUT_DIR
+            - name: OUTPUT_CSV_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: OUTPUT_CSV_DIR
+          volumeMounts:
+            - name: upload-storage
+              mountPath: /tmp/uploads
+            - name: output-images
+              mountPath: /tmp/output_images
+            - name: output-csvs
+              mountPath: /tmp/output_csvs
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          # Celery worker health check using celery inspect
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A celery_worker.celery inspect ping -d celery@$HOSTNAME
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+      
+      volumes:
+        - name: upload-storage
+          emptyDir: {}
+        - name: output-images
+          emptyDir: {}
+        - name: output-csvs
+          emptyDir: {}

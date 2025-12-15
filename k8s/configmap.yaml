@@ -1,0 +1,35 @@
+# =============================================================================
+# ConfigMap - Application Configuration
+# =============================================================================
+# Non-sensitive configuration data for the image processing application
+# Usage: kubectl apply -f configmap.yaml -n <namespace>
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: image-processing-config
+  labels:
+    app: image-processing
+data:
+  # Flask Configuration
+  FLASK_APP: "app.py"
+  FLASK_ENV: "production"
+  
+  # File Storage Paths
+  UPLOAD_FOLDER: "/tmp/uploads"
+  IMAGE_OUTPUT_DIR: "/tmp/output_images"
+  OUTPUT_CSV_DIR: "/tmp/output_csvs"
+  
+  # Database Configuration (non-sensitive)
+  POSTGRES_DB: "image_processing"
+  POSTGRES_USER: "postgres"
+  
+  # RabbitMQ Configuration (non-sensitive)
+  RABBITMQ_DEFAULT_USER: "guest"
+  
+  # Celery Configuration
+  CELERY_BROKER_URL: "amqp://guest:guest@rabbitmq-service:5672//"
+  CELERY_RESULT_BACKEND: "rpc://"
+  
+  # Database URL (using service DNS)
+  DATABASE_URL: "postgresql://postgres:postgres@postgres-service:5432/image_processing"

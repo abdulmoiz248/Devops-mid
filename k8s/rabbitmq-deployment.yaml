@@ -1,0 +1,122 @@
+# =============================================================================
+# RabbitMQ Message Broker Deployment
+# =============================================================================
+# Deploys RabbitMQ for Celery task queue
+# Usage: kubectl apply -f rabbitmq-deployment.yaml -n <namespace>
+
+---
+# Persistent Volume Claim for RabbitMQ data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-pvc
+  labels:
+    app: image-processing
+    component: message-broker
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+# RabbitMQ Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  labels:
+    app: image-processing
+    component: message-broker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-processing
+      component: message-broker
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: image-processing
+        component: message-broker
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management-alpine
+          ports:
+            - containerPort: 5672
+              name: amqp
+            - containerPort: 15672
+              name: management
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: image-processing-config
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: image-processing-secrets
+                  key: RABBITMQ_DEFAULT_PASS
+          volumeMounts:
+            - name: rabbitmq-storage
+              mountPath: /var/lib/rabbitmq
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - ping
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - rabbitmq-diagnostics
+                - -q
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 5
+      volumes:
+        - name: rabbitmq-storage
+          persistentVolumeClaim:
+            claimName: rabbitmq-pvc
+
+---
+# RabbitMQ Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service
+  labels:
+    app: image-processing
+    component: message-broker
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5672
+      targetPort: 5672
+      protocol: TCP
+      name: amqp
+    - port: 15672
+      targetPort: 15672
+      protocol: TCP
+      name: management
+  selector:
+    app: image-processing
+    component: message-broker

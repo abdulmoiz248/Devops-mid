@@ -1,0 +1,25 @@
+# =============================================================================
+# Kustomization for Environment-Specific Deployments
+# =============================================================================
+# Base kustomization for the image-processing application
+# Usage: kubectl apply -k k8s/base/ or kubectl apply -k k8s/overlays/dev/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: image-processing-base
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - postgres-deployment.yaml
+  - rabbitmq-deployment.yaml
+  - deployment.yaml
+  - celery-deployment.yaml
+  - service.yaml
+
+commonLabels:
+  app: image-processing
+  managed-by: kustomize
