@@ -21,7 +21,8 @@ resource "aws_db_subnet_group" "main" {
 # RDS PostgreSQL Instance
 # Free Tier: db.t3.micro with 20GB storage, single-AZ, PostgreSQL
 resource "aws_db_instance" "postgres" {
-  identifier = "${var.project_name}-postgres-${random_id.db_suffix.hex}"
+  # Use a stable identifier so Terraform doesn't replace the DB on each run
+  identifier = "${var.project_name}-postgres"
 
   engine = "postgres"
   # Let AWS pick a supported default engine version for your region
@@ -54,7 +55,8 @@ resource "aws_db_instance" "postgres" {
     Name = "${var.project_name}-postgres"
   }
 
+  # Prevent accidental deletion of the production DB via Terraform
   lifecycle {
-    create_before_destroy = true
+    prevent_destroy = true
   }
 }
