@@ -1,0 +1,117 @@
+name: Manual Infrastructure Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "destroy" to confirm infrastructure deletion'
+        required: true
+        type: string
+      region:
+        description: 'AWS Region'
+        required: false
+        type: string
+        default: 'us-east-1'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  validate-and-destroy:
+    name: 'Destroy Infrastructure'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    
+    steps:
+      - name: Validate confirmation
+        if: inputs.confirmation != 'destroy'
+        run: |
+          echo "::error::Confirmation word 'destroy' not provided. Aborting."
+          exit 1
+      
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.region }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: List current resources
+        run: |
+          echo "## Current Infrastructure Resources" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### EC2 Instances" >> $GITHUB_STEP_SUMMARY
+          aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=devops-mid" "Name=instance-state-name,Values=running,stopped" \
+            --query 'Reservations[].Instances[].[InstanceId,State.Name,PublicIpAddress]' \
+            --output table || echo "No EC2 instances found" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### RDS Instances" >> $GITHUB_STEP_SUMMARY
+          aws rds describe-db-instances \
+            --query 'DBInstances[].[DBInstanceIdentifier,DBInstanceStatus,Endpoint.Address]' \
+            --output table || echo "No RDS instances found" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### VPCs" >> $GITHUB_STEP_SUMMARY
+          aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=devops-mid" \
+            --query 'Vpcs[].[VpcId,CidrBlock,State]' \
+            --output table || echo "No VPCs found" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Terraform Destroy
+        run: |
+          terraform destroy -auto-approve \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_region=${{ inputs.region }}"
+      
+      - name: Verify complete cleanup
+        run: |
+          echo "## Post-Destroy Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          EC2_COUNT=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=devops-mid" "Name=instance-state-name,Values=running,stopped" \
+            --query 'length(Reservations[].Instances[])' || echo "0")
+          
+          RDS_COUNT=$(aws rds describe-db-instances \
+            --query 'length(DBInstances[?contains(DBInstanceIdentifier, `devops-mid`)])' || echo "0")
+          
+          VPC_COUNT=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=devops-mid" \
+            --query 'length(Vpcs[])' || echo "0")
+          
+          echo "- EC2 Instances remaining: $EC2_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- RDS Instances remaining: $RDS_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- VPCs remaining: $VPC_COUNT" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$EC2_COUNT" -eq 0 ] && [ "$RDS_COUNT" -eq 0 ] && [ "$VPC_COUNT" -eq 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **All resources successfully destroyed!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Some resources may still exist. Please check AWS Console.**" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Summary
+        run: |
+          echo "Infrastructure destruction completed at $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "Region: ${{ inputs.region }}" >> $GITHUB_STEP_SUMMARY
