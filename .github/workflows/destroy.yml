@@ -29,14 +29,15 @@ jobs:
         working-directory: infra
     
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Validate confirmation
         if: inputs.confirmation != 'destroy'
+        working-directory: .
         run: |
           echo "::error::Confirmation word 'destroy' not provided. Aborting."
           exit 1
-      
-      - name: Checkout code
-        uses: actions/checkout@v4
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
