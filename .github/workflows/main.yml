@@ -341,10 +341,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Import existing key pair if present
+          # Import existing key pair if present. Some provider import implementations may try
+          # to call ImportKeyPair which fails if the key already exists; to avoid that,
+          # temporarily comment out the public_key line in the resource before importing.
           if aws ec2 describe-key-pairs --query "KeyPairs[?KeyName=='${{ env.PROJECT_NAME }}-key'].KeyName" --output text 2>/dev/null | grep -q .; then
-            echo "Importing existing key pair '${{ env.PROJECT_NAME }}-key' into Terraform state"
+            echo "Existing key pair '${{ env.PROJECT_NAME }}-key' detected. Preparing to import into Terraform state."
+            EC2_TF=ec2.tf
+            BACKUP=${EC2_TF}.bak
+            if [ -f "$EC2_TF" ]; then
+              cp "$EC2_TF" "$BACKUP"
+              # Comment out the public_key line to avoid provider trying to import key material
+              sed -E "s/^(\s*public_key\s*=\s*.*)/# \1/" "$BACKUP" > "$EC2_TF"
+            fi
             terraform import aws_key_pair.deployer "${{ env.PROJECT_NAME }}-key" || echo "Import failed or already imported"
+            # Restore original file if we modified it
+            if [ -f "$BACKUP" ]; then
+              mv "$BACKUP" "$EC2_TF"
+            fi
           else
             echo "No existing key pair named '${{ env.PROJECT_NAME }}-key'"
           fi
