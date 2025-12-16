@@ -497,23 +497,44 @@ jobs:
         run: |
           cd infra
           terraform init
-          EC2_IPS=$(terraform output -json ec2_public_ips | jq -r '.[]')
-          RDS_ENDPOINT=$(terraform output -raw rds_address)
-          DB_NAME=$(terraform output -raw rds_database_name)
-          DB_USER=$(terraform output -raw rds_username)
-
+          
+          # Check if outputs exist
+          if ! terraform output -json ec2_public_ips > /dev/null 2>&1; then
+            echo "⚠️  Terraform outputs not found. Skipping inventory generation."
+            echo "   Run 'terraform apply' first to create infrastructure."
+            exit 0
+          fi
+          
+          # Get Terraform outputs with error handling
+          EC2_IPS=$(terraform output -json ec2_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null || echo "")
+          RDS_ENDPOINT=$(terraform output -raw rds_address 2>/dev/null || echo "")
+          DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo "devopsdb")
+          DB_USER=$(terraform output -raw rds_username 2>/dev/null || echo "dbadmin")
+          
+          # Check if we have EC2 IPs
+          if [ -z "$EC2_IPS" ] || [ "$EC2_IPS" = "null" ]; then
+            echo "⚠️  No EC2 instances found. Inventory will be empty."
+            EC2_HOSTS=""
+          else
+            EC2_HOSTS=$(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
+          fi
+          
+          # Generate inventory file
           cat > ../ansible/inventory/hosts.ini <<EOF
+          # Auto-generated Ansible Inventory
+          # Generated on: $(date)
+          
           [ec2_instances]
-          $(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
-
+          $EC2_HOSTS
+          
           [ec2_instances:vars]
           ansible_user=ec2-user
           ansible_ssh_private_key_file=~/.ssh/id_rsa
           ansible_python_interpreter=/usr/bin/python3
-
+          
           [app_servers]
-          $(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
-
+          $EC2_HOSTS
+          
           [app_servers:vars]
           app_name=devops-mid
           app_port=5000
@@ -522,19 +543,41 @@ jobs:
           db_name=$DB_NAME
           db_user=$DB_USER
           db_password=${{ secrets.DB_PASSWORD }}
-
+          
           [all:vars]
           ansible_connection=ssh
           ansible_ssh_common_args='-o StrictHostKeyChecking=no'
           EOF
+          
+          echo "✅ Inventory file generated"
+          if [ -n "$EC2_HOSTS" ]; then
+            echo "   EC2 Instances:"
+            echo "$EC2_HOSTS" | sed 's/^/     /'
+          else
+            echo "   ⚠️  No EC2 instances in inventory"
+          fi
+
+      - name: Check if inventory has hosts
+        id: check_inventory
+        run: |
+          cd ansible
+          if grep -q "ansible_host=" inventory/hosts.ini; then
+            echo "has_hosts=true" >> $GITHUB_OUTPUT
+            echo "✅ Inventory contains hosts"
+          else
+            echo "has_hosts=false" >> $GITHUB_OUTPUT
+            echo "⚠️  Inventory is empty - skipping Ansible steps"
+          fi
 
       - name: Test Ansible Connectivity
+        if: steps.check_inventory.outputs.has_hosts == 'true'
         run: |
           cd ansible
           ansible all -m ping -i inventory/hosts.ini
         continue-on-error: true
 
       - name: Run Ansible Playbook
+        if: steps.check_inventory.outputs.has_hosts == 'true'
         run: |
           cd ansible
           ansible-playbook -i inventory/hosts.ini playbook.yaml -v \
@@ -544,6 +587,7 @@ jobs:
             -e "deploy_app=true"
 
       - name: Verify Installation
+        if: steps.check_inventory.outputs.has_hosts == 'true'
         run: |
           cd ansible
           ansible ec2_instances -i inventory/hosts.ini -a "docker --version"
