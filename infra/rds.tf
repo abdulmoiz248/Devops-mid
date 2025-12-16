@@ -1,18 +1,14 @@
-# Random suffix to avoid naming conflicts in CI/CD
-resource "random_id" "db_suffix" {
-  byte_length = 4
-}
-
 # DB Subnet Group
 resource "aws_db_subnet_group" "main" {
-  name       = "${var.project_name}-db-subnet-${random_id.db_suffix.hex}"
+  # Use a stable name so changes to other resources do not force a replacement
+  name       = "${var.project_name}-db-subnet"
   subnet_ids = aws_subnet.private[*].id
 
   tags = {
     Name = "${var.project_name}-db-subnet-group"
   }
 
-  # Force replacement when subnets change to avoid VPC mismatch
+  # Keep create_before_destroy to avoid momentary invalid states when subnets change
   lifecycle {
     create_before_destroy = true
   }
@@ -21,7 +17,8 @@ resource "aws_db_subnet_group" "main" {
 # RDS PostgreSQL Instance
 # Free Tier: db.t3.micro with 20GB storage, single-AZ, PostgreSQL
 resource "aws_db_instance" "postgres" {
-  identifier = "${var.project_name}-postgres-${random_id.db_suffix.hex}"
+  # Use a stable identifier so Terraform doesn't replace the DB on each run
+  identifier = "${var.project_name}-postgres"
 
   engine = "postgres"
   # Let AWS pick a supported default engine version for your region
@@ -54,7 +51,8 @@ resource "aws_db_instance" "postgres" {
     Name = "${var.project_name}-postgres"
   }
 
+  # Prevent accidental deletion of the production DB via Terraform
   lifecycle {
-    create_before_destroy = true
+    prevent_destroy = true
   }
 }

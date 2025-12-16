@@ -41,6 +41,18 @@
           - amazon-cloudwatch-agent
         state: present
       tags: ['system', 'packages']
+      
+    - name: Verify curl is available (provided by curl-minimal on Amazon Linux 2023)
+      ansible.builtin.command: curl --version
+      register: curl_check
+      changed_when: false
+      failed_when: false
+      tags: ['system', 'packages']
+      
+    - name: Display curl status
+      ansible.builtin.debug:
+        msg: "curl is {{ 'available' if curl_check.rc == 0 else 'not available' }} (curl-minimal provides curl on Amazon Linux 2023)"
+      tags: ['system', 'packages']
 
     - name: Verify curl is available (provided by curl-minimal on Amazon Linux 2023)
       ansible.builtin.command: curl --version

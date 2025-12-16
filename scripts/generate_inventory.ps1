@@ -6,12 +6,63 @@ Write-Host "Generating Ansible inventory from Terraform outputs..." -ForegroundC
 # Change to infra directory
 Set-Location "$PSScriptRoot\..\infra"
 
-# Get Terraform outputs
-$ec2IpsJson = terraform output -json ec2_public_ips | ConvertFrom-Json
-$rdsEndpoint = terraform output -raw rds_endpoint
-$rdsAddress = terraform output -raw rds_address
-$dbUsername = terraform output -raw rds_username
-$dbName = terraform output -raw rds_database_name
+# Check if Terraform is initialized
+if (-not (Test-Path ".terraform")) {
+    Write-Host "⚠️  Terraform not initialized. Running terraform init..." -ForegroundColor Yellow
+    terraform init
+}
+
+# Check if outputs exist
+try {
+    $null = terraform output -json ec2_public_ips 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Terraform outputs not found"
+    }
+} catch {
+    Write-Host "❌ Error: Terraform outputs not found!" -ForegroundColor Red
+    Write-Host "   Please run 'terraform apply' first to create infrastructure." -ForegroundColor Yellow
+    exit 1
+}
+
+# Get Terraform outputs with error handling
+try {
+    $ec2IpsJson = terraform output -json ec2_public_ips 2>$null | ConvertFrom-Json
+    if (-not $ec2IpsJson -or $ec2IpsJson.Count -eq 0) {
+        Write-Host "⚠️  Warning: No EC2 instances found in Terraform outputs!" -ForegroundColor Yellow
+        $ec2IpsJson = @()
+    }
+} catch {
+    Write-Host "⚠️  Warning: Could not get EC2 IPs. Inventory will be empty." -ForegroundColor Yellow
+    $ec2IpsJson = @()
+}
+
+try {
+    $rdsEndpoint = terraform output -raw rds_endpoint 2>$null
+    if (-not $rdsEndpoint) { $rdsEndpoint = "" }
+} catch {
+    $rdsEndpoint = ""
+}
+
+try {
+    $rdsAddress = terraform output -raw rds_address 2>$null
+    if (-not $rdsAddress) { $rdsAddress = "" }
+} catch {
+    $rdsAddress = ""
+}
+
+try {
+    $dbUsername = terraform output -raw rds_username 2>$null
+    if (-not $dbUsername) { $dbUsername = "dbadmin" }
+} catch {
+    $dbUsername = "dbadmin"
+}
+
+try {
+    $dbName = terraform output -raw rds_database_name 2>$null
+    if (-not $dbName) { $dbName = "devopsdb" }
+} catch {
+    $dbName = "devopsdb"
+}
 
 # Create inventory file path
 $inventoryFile = "..\ansible\inventory\hosts.ini"
@@ -27,10 +78,14 @@ $inventoryContent = @"
 "@
 
 # Add EC2 instances
-$counter = 1
-foreach ($ip in $ec2IpsJson) {
-    $inventoryContent += "`nec2-$counter ansible_host=$ip"
-    $counter++
+if ($ec2IpsJson -and $ec2IpsJson.Count -gt 0) {
+    $counter = 1
+    foreach ($ip in $ec2IpsJson) {
+        if ($ip -and $ip -ne "null") {
+            $inventoryContent += "`nec2-$counter ansible_host=$ip"
+            $counter++
+        }
+    }
 }
 
 $inventoryContent += @"
@@ -45,10 +100,14 @@ ansible_python_interpreter=/usr/bin/python3
 "@
 
 # Add app servers (same as EC2 instances)
-$counter = 1
-foreach ($ip in $ec2IpsJson) {
-    $inventoryContent += "`nec2-$counter ansible_host=$ip"
-    $counter++
+if ($ec2IpsJson -and $ec2IpsJson.Count -gt 0) {
+    $counter = 1
+    foreach ($ip in $ec2IpsJson) {
+        if ($ip -and $ip -ne "null") {
+            $inventoryContent += "`nec2-$counter ansible_host=$ip"
+            $counter++
+        }
+    }
 }
 
 $inventoryContent += @"

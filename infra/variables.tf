@@ -122,6 +122,12 @@ variable "ssh_public_key" {
   sensitive   = false
 }
 
+variable "manage_ssh_key" {
+  description = "Whether Terraform should manage (create) the SSH key pair. Set to false to use an existing keypair in AWS."
+  type        = bool
+  default     = true
+}
+
 variable "docker_image" {
   description = "Docker image to deploy on EC2 instances"
   type        = string
