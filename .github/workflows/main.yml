@@ -396,6 +396,7 @@ jobs:
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
             -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
+            -var="manage_ssh_key=false" \
             -var="db_instance_class=db.t3.micro" \
             -out=tfplan
 

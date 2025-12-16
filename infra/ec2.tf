@@ -18,12 +18,19 @@ data "aws_ami" "amazon_linux" {
 # For CI/CD: Pass public key via variable
 # For local: Use file() function
 resource "aws_key_pair" "deployer" {
+  count      = var.manage_ssh_key ? 1 : 0
   key_name   = "${var.project_name}-key"
   public_key = var.ssh_public_key != "" ? var.ssh_public_key : file(pathexpand("~/.ssh/id_rsa.pub"))
 
   tags = {
     Name = "${var.project_name}-key"
   }
+}
+
+# If Terraform is not managing the key, read the existing keypair
+data "aws_key_pair" "existing" {
+  count    = var.manage_ssh_key ? 0 : 1
+  key_name = "${var.project_name}-key"
 }
 
 # EC2 Instances
@@ -33,7 +40,7 @@ resource "aws_instance" "app" {
   instance_type          = var.ec2_instance_type
   subnet_id              = aws_subnet.public[count.index % length(aws_subnet.public)].id
   vpc_security_group_ids = [aws_security_group.ec2.id]
-  key_name               = aws_key_pair.deployer.key_name
+  key_name = var.manage_ssh_key ? aws_key_pair.deployer[0].key_name : data.aws_key_pair.existing[0].key_name
 
   user_data = <<-EOF
               #!/bin/bash
