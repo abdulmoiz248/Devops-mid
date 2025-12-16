@@ -869,6 +869,32 @@ jobs:
       - name: Wait before destroy (allow time for testing)
         run: sleep 120
 
+      - name: Refresh Terraform State
+        run: |
+          # Refresh state to ensure it's up to date with actual AWS resources
+          terraform refresh \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="aws_region=${{ env.AWS_REGION }}" \
+            -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" \
+            -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
+            -var="ec2_instance_type=t3.micro" \
+            -var="ec2_instance_count=1" \
+            -var="db_instance_class=db.t3.micro" || true
+        continue-on-error: true
+
+      - name: Force Delete RDS Instance First (to avoid dependency issues)
+        run: |
+          echo "Checking for RDS instances to delete first..."
+          for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
+            echo "Found RDS instance: $db - initiating deletion..."
+            aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || echo "RDS $db deletion already in progress or failed"
+          done
+          
+          # Wait for RDS to start deleting (don't wait for full completion)
+          echo "Waiting 30 seconds for RDS deletion to initiate..."
+          sleep 30
+        continue-on-error: true
+
       - name: Terraform Destroy
         run: |
           terraform destroy -auto-approve \
@@ -878,31 +904,112 @@ jobs:
             -var="docker_image=${{ secrets.DOCKERHUB_USERNAME }}/devops-mid:latest" \
             -var="ec2_instance_type=t3.micro" \
             -var="ec2_instance_count=1" \
-            -var="db_instance_class=db.t3.micro"
+            -var="db_instance_class=db.t3.micro" || echo "Terraform destroy had errors, will attempt manual cleanup"
+        continue-on-error: true
 
-      - name: Cleanup Orphaned Resources
+      - name: Force Cleanup - Delete All Project Resources
         run: |
-          # Clean up any orphaned DB subnet groups
-          for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
-            echo "Deleting orphaned DB subnet group: $sg"
-            aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || true
-          done
-
-          # Clean up any orphaned DB instances
+          echo "=== Force Cleanup: Deleting all project resources ==="
+          
+          # 1. Delete RDS instances
+          echo "Step 1: Deleting RDS instances..."
           for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
-            echo "Deleting orphaned DB instance: $db"
+            echo "Deleting RDS: $db"
             aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || true
           done
-        continue-on-error: true
+          
+          # 2. Wait for RDS to be deleted or in deleting state
+          echo "Step 2: Waiting for RDS instances to delete (max 5 minutes)..."
+          for i in {1..30}; do
+            REMAINING=$(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres') && DBInstanceStatus!='deleting'].DBInstanceIdentifier" --output text 2>/dev/null)
+            if [ -z "$REMAINING" ]; then
+              echo "All RDS instances deleted or in deleting state"
+              break
+            fi
+            echo "Attempt $i/30: Still waiting for RDS deletion..."
+            sleep 10
+          done
+          
+          # 3. Delete EC2 instances
+          echo "Step 3: Terminating EC2 instances..."
+          INSTANCES=$(aws ec2 describe-instances --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=instance-state-name,Values=running,stopped,pending" --query "Reservations[*].Instances[*].InstanceId" --output text 2>/dev/null)
+          if [ -n "$INSTANCES" ]; then
+            echo "Terminating instances: $INSTANCES"
+            aws ec2 terminate-instances --instance-ids $INSTANCES 2>/dev/null || true
+            echo "Waiting 60 seconds for instance termination..."
+            sleep 60
+          fi
+          
+          # 4. Delete DB subnet groups (after RDS is gone)
+          echo "Step 4: Deleting DB subnet groups..."
+          for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
+            echo "Deleting DB subnet group: $sg"
+            aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || true
+          done
+          
+          # 5. Delete security groups
+          echo "Step 5: Deleting security groups..."
+          for vpc in $(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" --query "Vpcs[*].VpcId" --output text 2>/dev/null); do
+            for sg in $(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text 2>/dev/null); do
+              echo "Deleting security group: $sg"
+              aws ec2 delete-security-group --group-id "$sg" 2>/dev/null || true
+            done
+          done
+          
+          # 6. Delete subnets, route tables, internet gateways, and VPCs
+          echo "Step 6: Cleaning up VPC resources..."
+          for vpc in $(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" --query "Vpcs[*].VpcId" --output text 2>/dev/null); do
+            echo "Cleaning up VPC: $vpc"
+            
+            # Delete subnets
+            for subnet in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" --query "Subnets[*].SubnetId" --output text 2>/dev/null); do
+              echo "  Deleting subnet: $subnet"
+              aws ec2 delete-subnet --subnet-id "$subnet" 2>/dev/null || true
+            done
+            
+            # Delete route tables (non-main)
+            for rt in $(aws ec2 describe-route-tables --filters "Name=vpc-id,Values=$vpc" --query "RouteTables[?Associations[0].Main!=\`true\`].RouteTableId" --output text 2>/dev/null); do
+              echo "  Deleting route table: $rt"
+              aws ec2 delete-route-table --route-table-id "$rt" 2>/dev/null || true
+            done
+            
+            # Detach and delete internet gateways
+            for igw in $(aws ec2 describe-internet-gateways --filters "Name=attachment.vpc-id,Values=$vpc" --query "InternetGateways[*].InternetGatewayId" --output text 2>/dev/null); do
+              echo "  Detaching and deleting IGW: $igw"
+              aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$vpc" 2>/dev/null || true
+              aws ec2 delete-internet-gateway --internet-gateway-id "$igw" 2>/dev/null || true
+            done
+            
+            # Delete VPC
+            echo "  Deleting VPC: $vpc"
+            aws ec2 delete-vpc --vpc-id "$vpc" 2>/dev/null || echo "Could not delete VPC $vpc - may have remaining dependencies"
+          done
+          
+          # 7. Delete key pairs
+          echo "Step 7: Deleting key pairs..."
+          aws ec2 delete-key-pair --key-name "${{ env.PROJECT_NAME }}-key" 2>/dev/null || true
+          
+          echo "=== Force cleanup completed ==="
 
       - name: Verify Cleanup
         run: |
+          echo "=== Verifying cleanup ==="
+          
+          echo "Checking for remaining EC2 instances..."
           aws ec2 describe-instances \
-            --filters "Name=tag:Project,Values=devops-mid" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[].Instances[].InstanceId' || echo "No instances found"
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" "Name=instance-state-name,Values=running,stopped,pending" \
+            --query 'Reservations[].Instances[].[InstanceId,State.Name]' --output table || echo "No EC2 instances found"
 
+          echo "Checking for remaining RDS instances..."
           aws rds describe-db-instances \
-            --query 'DBInstances[?DBInstanceIdentifier==`devops-mid-postgres`].DBInstanceIdentifier' || echo "No RDS found"
+            --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].[DBInstanceIdentifier,DBInstanceStatus]" --output table || echo "No RDS instances found"
+
+          echo "Checking for remaining VPCs..."
+          aws ec2 describe-vpcs \
+            --filters "Name=tag:Project,Values=${{ env.PROJECT_NAME }}" \
+            --query 'Vpcs[].[VpcId,State]' --output table || echo "No VPCs found"
+            
+          echo "=== Verification complete ==="
 
   # ============================================
   # Final Status Report
