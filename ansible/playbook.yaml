@@ -33,7 +33,6 @@
       ansible.builtin.yum:
         name:
           - git
-          - curl
           - wget
           - vim
           - htop
@@ -41,6 +40,18 @@
           - python3-pip
           - amazon-cloudwatch-agent
         state: present
+      tags: ['system', 'packages']
+
+    - name: Verify curl is available (provided by curl-minimal on Amazon Linux 2023)
+      ansible.builtin.command: curl --version
+      register: curl_check
+      changed_when: false
+      failed_when: curl_check.rc != 0
+      tags: ['system', 'packages']
+
+    - name: Display curl status
+      ansible.builtin.debug:
+        msg: "curl is available (curl-minimal provides curl on Amazon Linux 2023)"
       tags: ['system', 'packages']
 
     # ================================
@@ -86,21 +97,46 @@
     - name: Install Python packages
       ansible.builtin.pip:
         name:
-          - pip
-          - setuptools
           - wheel
           - virtualenv
         executable: pip3
-        state: latest
+        state: present
+        extra_args: "--user --ignore-installed"
+      become: no
+      become_user: ec2-user
       tags: ['python']
 
-    - name: Install Docker SDK for Python
+    - name: Upgrade pip in user space (avoid RPM conflicts)
+      ansible.builtin.pip:
+        name: pip
+        executable: pip3
+        state: latest
+        extra_args: "--user"
+      become: no
+      become_user: ec2-user
+      tags: ['python']
+
+    - name: Install Docker SDK for Python (system-wide with --break-system-packages)
       ansible.builtin.pip:
         name:
           - docker
           - docker-compose
         executable: pip3
         state: present
+        extra_args: "--break-system-packages"
+      tags: ['python', 'docker']
+      ignore_errors: yes
+
+    - name: Install Docker SDK for Python (fallback - user space)
+      ansible.builtin.pip:
+        name:
+          - docker
+          - docker-compose
+        executable: pip3
+        state: present
+        extra_args: "--user"
+      become: no
+      become_user: ec2-user
       tags: ['python', 'docker']
 
     # ================================
