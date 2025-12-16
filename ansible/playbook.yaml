@@ -187,7 +187,7 @@
         group: ec2-user
         mode: '0600'
       tags: ['app', 'config']
-      when: db_endpoint is defined
+      when: db_host is defined and db_host != ''
 
     # ================================
     # Firewall Configuration
@@ -332,6 +332,14 @@
         env:
           FLASK_APP: app.py
           FLASK_ENV: production
+          DATABASE_URL: "postgresql://{{ db_user | default('dbadmin') }}:{{ db_password }}@{{ db_host | default('localhost') }}:{{ db_port | default('5432') }}/{{ db_name | default('devopsdb') }}"
+          SQLALCHEMY_DATABASE_URI: "postgresql://{{ db_user | default('dbadmin') }}:{{ db_password }}@{{ db_host | default('localhost') }}:{{ db_port | default('5432') }}/{{ db_name | default('devopsdb') }}"
+          DB_HOST: "{{ db_host | default('localhost') }}"
+          DB_PORT: "{{ db_port | default('5432') }}"
+          DB_NAME: "{{ db_name | default('devopsdb') }}"
+          DB_USER: "{{ db_user | default('dbadmin') }}"
+          DB_PASSWORD: "{{ db_password | default('') }}"
+          SKIP_DB_WAIT: "{{ 'false' if (db_host is defined and db_host != '') else 'true' }}"
         volumes:
           - "{{ app_dir }}/uploads:/app/uploads"
           - "{{ app_dir }}/instance:/app/instance"
