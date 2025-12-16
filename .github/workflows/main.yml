@@ -233,7 +233,10 @@ jobs:
         working-directory: infra
     outputs:
       ec2_ips: ${{ steps.output.outputs.ec2_ips }}
+      rds_address: ${{ steps.output.outputs.rds_address }}
       rds_endpoint: ${{ steps.output.outputs.rds_endpoint }}
+      db_name: ${{ steps.output.outputs.db_name }}
+      db_user: ${{ steps.output.outputs.db_user }}
 
     steps:
       - name: Checkout code
@@ -317,24 +320,66 @@ jobs:
             aws ec2 delete-vpc --vpc-id "$vpc" 2>/dev/null || echo "Could not delete VPC $vpc - may have remaining dependencies"
           done
 
-          # ==== Delete DB subnet groups ====
-          for sg in $(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null); do
-            echo "Deleting DB subnet group: $sg"
-            aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || echo "Could not delete $sg"
-          done
-
-          # ==== Delete orphaned DB instances ====
-          for db in $(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null); do
-            echo "Found DB instance: $db - checking status..."
-            status=$(aws rds describe-db-instances --db-instance-identifier "$db" --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null)
-            if [ "$status" != "deleting" ]; then
-              echo "Deleting DB instance: $db"
-              aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || echo "Could not delete $db"
+          # ==== Delete orphaned DB instances FIRST (before subnet groups) ====
+          echo "Checking for existing DB instances..."
+          DB_INSTANCES=$(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null || echo "")
+          
+          if [ -n "$DB_INSTANCES" ]; then
+            for db in $DB_INSTANCES; do
+              echo "Found DB instance: $db - checking status..."
+              status=$(aws rds describe-db-instances --db-instance-identifier "$db" --query "DBInstances[0].DBInstanceStatus" --output text 2>/dev/null || echo "not-found")
+              
+              if [ "$status" != "deleting" ] && [ "$status" != "not-found" ]; then
+                echo "Deleting DB instance: $db (this may take a few minutes)..."
+                aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || echo "Could not delete $db"
+              elif [ "$status" = "deleting" ]; then
+                echo "DB instance $db is already being deleted, waiting..."
+              fi
+            done
+            
+            # Wait for DB instances to be deleted (they can take 5-10 minutes)
+            echo "Waiting for DB instances to be deleted..."
+            MAX_WAIT=600  # 10 minutes max wait
+            ELAPSED=0
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              REMAINING=$(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null || echo "")
+              if [ -z "$REMAINING" ]; then
+                echo "All DB instances deleted successfully"
+                break
+              fi
+              echo "Still waiting for DB instances to be deleted... ($ELAPSED seconds elapsed)"
+              sleep 30
+              ELAPSED=$((ELAPSED + 30))
+            done
+            
+            if [ $ELAPSED -ge $MAX_WAIT ]; then
+              echo "⚠️  Warning: DB instances may still be deleting, but proceeding with cleanup"
             fi
-          done
+          else
+            echo "No existing DB instances found"
+          fi
 
-          echo "Waiting for resource cleanup..."
-          sleep 15
+          # ==== Delete DB subnet groups AFTER DB instances are gone ====
+          echo "Deleting DB subnet groups..."
+          DB_SUBNET_GROUPS=$(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null || echo "")
+          
+          if [ -n "$DB_SUBNET_GROUPS" ]; then
+            for sg in $DB_SUBNET_GROUPS; do
+              echo "Deleting DB subnet group: $sg"
+              # Try to delete, but don't fail if it's still in use
+              aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || {
+                echo "Could not delete $sg immediately (may still be in use), will retry..."
+                # Force delete attempt after a short wait
+                sleep 10
+                aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null || echo "⚠️  Could not delete $sg - will be handled by Terraform"
+              }
+            done
+            sleep 10  # Give AWS time to process the deletion
+          else
+            echo "No existing DB subnet groups found"
+          fi
+
+          echo "Resource cleanup completed"
         continue-on-error: true
 
       - name: Import Existing Resources (if any)
@@ -362,17 +407,9 @@ jobs:
             echo "No existing key pair named '${{ env.PROJECT_NAME }}-key'"
           fi
 
-          # Detect and import any existing DB subnet groups that match the project prefix
-          DB_SUBNETS=$(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null || true)
-          if [ -n "$DB_SUBNETS" ]; then
-            for sg in $DB_SUBNETS; do
-              echo "Found existing DB subnet group: $sg - importing into Terraform state as aws_db_subnet_group.main"
-              terraform import aws_db_subnet_group.main "$sg" || echo "Failed to import $sg"
-              break
-            done
-          else
-            echo "No existing DB subnet group found with prefix '${{ env.PROJECT_NAME }}-db-subnet'"
-          fi
+          # Note: We don't import DB subnet groups - we delete them in cleanup step
+          # This ensures we start fresh with the correct VPC/subnets
+          echo "Skipping DB subnet group import - will be created fresh by Terraform"
 
           # Detect and import existing RDS DB instances matching the project prefix
           DB_INSTANCES=$(aws rds describe-db-instances --query "DBInstances[?starts_with(DBInstanceIdentifier, '${{ env.PROJECT_NAME }}-postgres')].DBInstanceIdentifier" --output text 2>/dev/null || true)
@@ -400,6 +437,79 @@ jobs:
             -var="db_instance_class=db.t3.micro" \
             -out=tfplan
 
+      - name: Final Cleanup - Ensure DB Subnet Groups are Deleted
+        run: |
+          echo "Final check: Ensuring DB subnet groups are deleted before Terraform apply..."
+          
+          # Check for existing DB subnet groups
+          DB_SUBNET_GROUPS=$(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null || echo "")
+          
+          if [ -n "$DB_SUBNET_GROUPS" ]; then
+            echo "⚠️  Found existing DB subnet groups: $DB_SUBNET_GROUPS"
+            
+            for sg in $DB_SUBNET_GROUPS; do
+              echo "Processing DB subnet group: $sg"
+              
+              # Check if any DB instances are using this subnet group
+              DB_USING_SG=$(aws rds describe-db-instances --query "DBInstances[?DBSubnetGroup.DBSubnetGroupName=='$sg' && DBInstanceStatus!='deleting'].DBInstanceIdentifier" --output text 2>/dev/null || echo "")
+              
+              if [ -n "$DB_USING_SG" ]; then
+                echo "⚠️  DB subnet group $sg is in use by DB instances: $DB_USING_SG"
+                echo "   Deleting DB instances first..."
+                for db in $DB_USING_SG; do
+                  echo "   Deleting DB instance: $db"
+                  aws rds delete-db-instance --db-instance-identifier "$db" --skip-final-snapshot --delete-automated-backups 2>/dev/null || true
+                done
+                echo "   Waiting 60 seconds for DB deletion to start..."
+                sleep 60
+              fi
+              
+              # Try to delete the subnet group with retries
+              MAX_RETRIES=3
+              RETRY_COUNT=0
+              DELETED=false
+              
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$DELETED" = false ]; do
+                echo "   Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Deleting DB subnet group $sg..."
+                
+                if aws rds delete-db-subnet-group --db-subnet-group-name "$sg" 2>/dev/null; then
+                  echo "   ✅ Successfully deleted $sg"
+                  DELETED=true
+                  sleep 10  # Wait for AWS to process the deletion
+                else
+                  RETRY_COUNT=$((RETRY_COUNT + 1))
+                  if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                    echo "   ⚠️  Deletion failed, waiting 15 seconds before retry..."
+                    sleep 15
+                  else
+                    echo "   ❌ Failed to delete $sg after $MAX_RETRIES attempts"
+                    echo "   Attempting to import into Terraform state instead..."
+                    terraform import aws_db_subnet_group.main "$sg" 2>/dev/null && {
+                      echo "   ✅ Successfully imported $sg into Terraform state"
+                    } || {
+                      echo "   ❌ Failed to import $sg - Terraform apply may fail"
+                    }
+                  fi
+                fi
+              done
+            done
+            
+            # Final verification
+            sleep 5
+            REMAINING=$(aws rds describe-db-subnet-groups --query "DBSubnetGroups[?starts_with(DBSubnetGroupName, '${{ env.PROJECT_NAME }}-db-subnet')].DBSubnetGroupName" --output text 2>/dev/null || echo "")
+            if [ -n "$REMAINING" ]; then
+              echo "⚠️  Warning: Some DB subnet groups still exist: $REMAINING"
+              echo "   Attempting to import remaining groups into Terraform state..."
+              for sg in $REMAINING; do
+                terraform import aws_db_subnet_group.main "$sg" 2>/dev/null || echo "   Failed to import $sg"
+              done
+            else
+              echo "✅ All DB subnet groups successfully deleted"
+            fi
+          else
+            echo "✅ No existing DB subnet groups found"
+          fi
+
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
 
@@ -423,16 +533,42 @@ jobs:
           fi
           echo "ec2_ips=$EC2_JSON" >> $GITHUB_OUTPUT
 
-          # Capture rds endpoint or empty string if not present
+          # Capture RDS address (not endpoint, as endpoint includes port)
+          RDS_ADDR=$(terraform output -raw rds_address 2>/dev/null || echo '')
+          if echo "$RDS_ADDR" | grep -qi "no outputs"; then
+            RDS_ADDR=''
+          fi
+          echo "rds_address=$RDS_ADDR" >> $GITHUB_OUTPUT
+
+          # Also capture RDS endpoint for reference
           RDS_EP=$(terraform output -raw rds_endpoint 2>/dev/null || echo '')
           if echo "$RDS_EP" | grep -qi "no outputs"; then
             RDS_EP=''
           fi
           echo "rds_endpoint=$RDS_EP" >> $GITHUB_OUTPUT
 
+          # Capture DB name and username
+          DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo 'devopsdb')
+          if echo "$DB_NAME" | grep -qi "no outputs"; then
+            DB_NAME='devopsdb'
+          fi
+          echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+
+          DB_USER=$(terraform output -raw rds_username 2>/dev/null || echo 'dbadmin')
+          if echo "$DB_USER" | grep -qi "no outputs"; then
+            DB_USER='dbadmin'
+          fi
+          echo "db_user=$DB_USER" >> $GITHUB_OUTPUT
+
           # Persist human-readable terraform output but do not fail if absent
           mkdir -p ${{ github.workspace }}/outputs
           terraform output > ${{ github.workspace }}/outputs/terraform-output.txt 2>/dev/null || true
+          
+          echo "✅ Extracted Terraform outputs:"
+          echo "   EC2 IPs: $EC2_JSON"
+          echo "   RDS Address: $RDS_ADDR"
+          echo "   DB Name: $DB_NAME"
+          echo "   DB User: $DB_USER"
 
       - name: Upload Terraform Outputs
         uses: actions/upload-artifact@v4
@@ -481,7 +617,17 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ needs.terraform-provision.outputs.ec2_ips }} >> ~/.ssh/known_hosts || true
+          
+          # Extract EC2 IPs from JSON and add to known_hosts
+          EC2_IPS_JSON='${{ needs.terraform-provision.outputs.ec2_ips }}'
+          if [ -n "$EC2_IPS_JSON" ] && [ "$EC2_IPS_JSON" != "[]" ] && [ "$EC2_IPS_JSON" != "null" ]; then
+            echo "$EC2_IPS_JSON" | jq -r '.[]' | while read ip; do
+              if [ -n "$ip" ]; then
+                echo "Adding $ip to known_hosts..."
+                ssh-keyscan -H "$ip" >> ~/.ssh/known_hosts 2>/dev/null || true
+              fi
+            done
+          fi
 
       - name: Setup Terraform for inventory generation
         uses: hashicorp/setup-terraform@v3
@@ -493,36 +639,67 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Generate Ansible Inventory
+      - name: Download Terraform State
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-state
+          path: infra/
+        continue-on-error: true
+
+      - name: Generate Ansible Inventory from Terraform Outputs
         run: |
-          cd infra
-          terraform init
+          # Use outputs from terraform-provision job (already extracted)
+          EC2_IPS_JSON='${{ needs.terraform-provision.outputs.ec2_ips }}'
+          RDS_ADDRESS='${{ needs.terraform-provision.outputs.rds_address }}'
+          DB_NAME='${{ needs.terraform-provision.outputs.db_name }}'
+          DB_USER='${{ needs.terraform-provision.outputs.db_user }}'
           
-          # Check if outputs exist
-          if ! terraform output -json ec2_public_ips > /dev/null 2>&1; then
-            echo "⚠️  Terraform outputs not found. Skipping inventory generation."
-            echo "   Run 'terraform apply' first to create infrastructure."
-            exit 0
+          echo "Generating Ansible inventory from Terraform outputs..."
+          echo "EC2 IPs JSON: $EC2_IPS_JSON"
+          echo "RDS Address: $RDS_ADDRESS"
+          echo "DB Name: $DB_NAME"
+          echo "DB User: $DB_USER"
+          
+          # Parse EC2 IPs from JSON array
+          if [ -n "$EC2_IPS_JSON" ] && [ "$EC2_IPS_JSON" != "[]" ] && [ "$EC2_IPS_JSON" != "null" ]; then
+            # Extract IPs from JSON array using jq
+            EC2_IPS=$(echo "$EC2_IPS_JSON" | jq -r '.[]' 2>/dev/null || echo "")
+            
+            if [ -n "$EC2_IPS" ]; then
+              # Generate host entries
+              EC2_HOSTS=$(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
+              echo "✅ Found EC2 instances:"
+              echo "$EC2_HOSTS" | sed 's/^/   /'
+            else
+              EC2_HOSTS=""
+              echo "⚠️  No EC2 IPs found in JSON"
+            fi
+          else
+            EC2_HOSTS=""
+            echo "⚠️  No EC2 instances found in Terraform outputs"
           fi
           
-          # Get Terraform outputs with error handling
-          EC2_IPS=$(terraform output -json ec2_public_ips 2>/dev/null | jq -r '.[]' 2>/dev/null || echo "")
-          RDS_ENDPOINT=$(terraform output -raw rds_address 2>/dev/null || echo "")
-          DB_NAME=$(terraform output -raw rds_database_name 2>/dev/null || echo "devopsdb")
-          DB_USER=$(terraform output -raw rds_username 2>/dev/null || echo "dbadmin")
-          
-          # Check if we have EC2 IPs
-          if [ -z "$EC2_IPS" ] || [ "$EC2_IPS" = "null" ]; then
-            echo "⚠️  No EC2 instances found. Inventory will be empty."
-            EC2_HOSTS=""
+          # Use RDS address directly (already extracted from Terraform)
+          if [ -z "$RDS_ADDRESS" ] || [ "$RDS_ADDRESS" = "null" ]; then
+            RDS_ADDRESS=""
+            echo "⚠️  No RDS address found"
           else
-            EC2_HOSTS=$(echo "$EC2_IPS" | awk '{print "ec2-"NR" ansible_host="$1}')
+            echo "✅ RDS Address: $RDS_ADDRESS"
+          fi
+          
+          # Use DB credentials from outputs (with defaults)
+          if [ -z "$DB_NAME" ] || [ "$DB_NAME" = "null" ]; then
+            DB_NAME="devopsdb"
+          fi
+          if [ -z "$DB_USER" ] || [ "$DB_USER" = "null" ]; then
+            DB_USER="dbadmin"
           fi
           
           # Generate inventory file
-          cat > ../ansible/inventory/hosts.ini <<EOF
+          cat > ansible/inventory/hosts.ini <<EOF
           # Auto-generated Ansible Inventory
           # Generated on: $(date)
+          # Source: Terraform outputs from terraform-provision job
           
           [ec2_instances]
           $EC2_HOSTS
@@ -538,7 +715,7 @@ jobs:
           [app_servers:vars]
           app_name=devops-mid
           app_port=5000
-          db_host=$RDS_ENDPOINT
+          db_host=$RDS_ADDRESS
           db_port=5432
           db_name=$DB_NAME
           db_user=$DB_USER
@@ -549,12 +726,14 @@ jobs:
           ansible_ssh_common_args='-o StrictHostKeyChecking=no'
           EOF
           
-          echo "✅ Inventory file generated"
+          echo ""
+          echo "✅ Inventory file generated successfully at ansible/inventory/hosts.ini"
+          echo ""
           if [ -n "$EC2_HOSTS" ]; then
-            echo "   EC2 Instances:"
-            echo "$EC2_HOSTS" | sed 's/^/     /'
+            echo "📋 Inventory contents:"
+            cat ansible/inventory/hosts.ini
           else
-            echo "   ⚠️  No EC2 instances in inventory"
+            echo "⚠️  Warning: Inventory file is empty (no EC2 instances)"
           fi
 
       - name: Check if inventory has hosts
