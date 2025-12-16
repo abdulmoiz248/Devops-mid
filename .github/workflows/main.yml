@@ -379,10 +379,26 @@ jobs:
       - name: Extract Terraform Outputs
         id: output
         run: |
-          echo "ec2_ips=$(terraform output -json ec2_public_ips)" >> $GITHUB_OUTPUT
-          echo "rds_endpoint=$(terraform output -raw rds_endpoint)" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          # Safely capture ec2_public_ips as JSON array or default to empty array
+          EC2_JSON=$(terraform output -json ec2_public_ips 2>/dev/null || echo '[]')
+          # Normalize Terraform warning text if present
+          if echo "$EC2_JSON" | grep -qi "no outputs"; then
+            EC2_JSON='[]'
+          fi
+          echo "ec2_ips=$EC2_JSON" >> $GITHUB_OUTPUT
+
+          # Capture rds endpoint or empty string if not present
+          RDS_EP=$(terraform output -raw rds_endpoint 2>/dev/null || echo '')
+          if echo "$RDS_EP" | grep -qi "no outputs"; then
+            RDS_EP=''
+          fi
+          echo "rds_endpoint=$RDS_EP" >> $GITHUB_OUTPUT
+
+          # Persist human-readable terraform output but do not fail if absent
           mkdir -p ${{ github.workspace }}/outputs
-          terraform output > ${{ github.workspace }}/outputs/terraform-output.txt
+          terraform output > ${{ github.workspace }}/outputs/terraform-output.txt 2>/dev/null || true
 
       - name: Upload Terraform Outputs
         uses: actions/upload-artifact@v4
